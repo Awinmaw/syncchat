@@ -15,6 +15,9 @@ print(os.path.abspath("syncchat.db")) # show the absolute path of the database f
 
 app = FastAPI()
 
+# Create tables if they don’t exist
+Base.metadata.create_all(bind=engine)
+
 # Allow Cloudflare Tunnel / external browser access
 app.add_middleware(
     CORSMiddleware,
@@ -71,8 +74,6 @@ def create_default_room():
         db.commit()
 
     db.close()
-
-Base.metadata.create_all(bind=engine)
 
 create_default_room()
 
