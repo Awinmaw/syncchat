@@ -38,10 +38,10 @@ app.include_router(auth.router)
 app.include_router(chat.router)
 app.include_router(users.router)
 
-app.add_middleware(
-    SessionMiddleware,
-    secret_key="syncchat_secret_key"
-)
+#app.add_middleware(
+#    SessionMiddleware,
+#    secret_key="syncchat_secret_key"
+#)
 
 @app.get("/")
 def home():
