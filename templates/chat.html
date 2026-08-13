@@ -1,0 +1,2235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>SyncChat</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="/static/Bootstrap-5.3.8/css/bootstrap.min.css">
+  <link rel="stylesheet" href="/static/css/chat.css">
+  <style></style>
+</head>
+<body class="m-0 p-0">
+    
+    <div id="toastBox"></div>
+    <div id="welcomeAlert"
+        class="alert alert-success alert-dismissible fade position-fixed shadow"
+        style="
+            top:20px;
+            left:50%;
+            transform:translateX(-50%);
+            z-index:9999;
+            min-width:320px;
+            display:none;
+        "
+        role="alert">
+
+        <i class="fa-solid fa-circle-check me-2"></i>
+        Welcome ,
+        <strong>{{ username }}</strong>!
+
+        <button type="button" class="btn-close" data-bs-dismiss="alert">
+        </button>
+    </div>
+  <div class="container-fluid">
+    <div class="row h-100">
+
+      <!-- Sidebar -->
+      <div id="sidebar" class="col-12 col-md-3 bg-white border-end p-3">
+
+        <div class="sidebar-header">
+            <div>
+                <h2 style="color:#1d8dc9; margin-bottom:5px;">
+                    SyncChat
+                </h2>
+
+                <h5 class="text-muted mb-4">
+                    Welcome 
+                    <span style="color:#1984be; font-weight:bold;">
+                        {{ username }}
+                    </span>
+                </h5>
+            </div>
+
+            <!-- Mobile close button -->
+            <button id="closeSidebar" class="btn btn-light d-md-none">
+                <i class="fas fa-times fa-lg"></i>
+            </button>
+
+        </div>
+
+        <button id="publicChat" class="btn BtnPS">
+            <i class="fa-solid fa-globe fa-lg me-1" style="color: rgb(255, 255, 255);"></i>
+               Join Group Chat
+        </button>
+
+        <hr>
+
+        <!-- SearchBox -->
+        <div class="user-search mb-3">
+            <div class="search-wrapper">
+                <i class="fas fa-search"></i>
+                <input id="userSearch" type="text" placeholder="Search">
+
+                <button id="clearSearch" style="display:none;">
+                    <i class="fa-regular fa-circle-xmark fa-shake" style="color: rgb(98, 92, 114);"></i>
+                </button>
+            </div>
+        </div>
+        
+        
+        <h6 class="text-muted">Recent chats</h6>
+        
+        <div id="usersContainer">
+
+            <div id="newChatUsers" style="display:none;"></div>
+            <div id="users"></div>
+            
+        </div>
+        <hr>
+        
+        <div class="sidebar-footer">
+          <button id="logoutBtn" class="btn btn-outline-black" style="color:#1984be;">
+              <i class="fa-solid fa-right-from-bracket"></i> Logout
+          </button>
+        </div>
+        
+      </div>
+
+      <!-- Chat Area -->
+      <div id="chatArea" class="col-12 col-md-9 px-0 d-flex flex-column ChatArea">
+        <div class="card border-0 p-0 flex-grow-1 d-flex flex-column">
+
+          <!-- Top Bar -->
+          <div class="chat-header">
+              <!-- Mobile hamburger -->
+              <button id="menuBtn" class="btn btn-sm btn-light d-md-none me-2">
+                  <i class="fa-solid fa-bars fa-xl" style="color: rgb(45, 144, 197);"></i>
+              </button>
+
+              <!-- Dynamic user info -->
+              <div id="chatHeader" class="flex-grow-1"></div>
+          </div>
+          
+          <!-- Messages -->
+          <div id="messages" class="flex-grow-1 overflow-auto"></div>
+
+          <!-- Sounds -->
+          <audio id="sendSound" src="/static/discord-notification.mp3" preload="auto"></audio>
+          <audio id="receiveSound" src="/static/telegram-notification.mp3" preload="auto"></audio>
+
+          <!-- scrollDown -->
+          <button id="scrollBottomBtn">
+              <i class="fa-solid fa-chevron-down"></i>
+          </button>
+
+          <!-- Input -->
+          <div style="background-color: #e8eef2;">
+            <div class="chat-input-container">
+              <textarea id="messageText" placeholder="Type a message..."></textarea>
+              <button id="sendBtn" title="Send">
+                  <i class="fas fa-arrow-up"></i>
+              </button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+<script src="/static/Bootstrap-5.3.8/js/bootstrap.bundle.min.js"></script>
+<script>
+
+  const username = "{{ username }}";
+
+  const unreadCounts = {};
+  const onlineUsers = {}; // *Map to track online status of users (important for public chat and user list updates)*
+  const lastSeenUsers = {};
+  const newChatUsers = {};
+  
+  let currentReceiver = null;
+  let totalUsersCount = 0;
+
+  // for websocket connect
+  let ws = null;
+  let reconnectTimer = null;
+  let manualClose = false;
+  let socketId = 0;
+
+  // render messages array
+  function renderMessages(messages) {
+  const messagesDiv = document.getElementById("messages");
+  
+  // Check scroll position BEFORE clearing messages
+  const wasNearBottom =
+      messagesDiv.scrollHeight -
+      messagesDiv.scrollTop -
+      messagesDiv.clientHeight < 80;
+
+  messagesDiv.innerHTML = "";
+
+  messages.forEach(msg => {
+    // wrapper row
+    const row = document.createElement("div");
+    row.className = msg.sender === username ? "message-row me" : "message-row other";
+
+    // avatar circle (only for received messages)
+    if (msg.sender !== username) {
+      const avatar = document.createElement("div");
+      
+      avatar.className = "avatar-circle-public";
+      avatar.style.backgroundColor = msg.avatar_color;
+      avatar.textContent = (msg.sender || "?").charAt(0).toUpperCase(); // initial character of sender
+      avatar.setAttribute("data-username", msg.sender);
+
+      const statusDot = document.createElement("span");
+      statusDot.className = `status-dot-public ${isUserOnline(msg.sender) ? 'status-online' : 'status-hidden'}`;
+      avatar.appendChild(statusDot);
+
+      row.appendChild(avatar);
+    }
+
+    // bubble
+    const bubble = document.createElement("div");
+    bubble.className = msg.sender === username ? "message me" : "message other";
+
+    // sender
+    const sender = document.createElement("strong");
+    if (msg.deleted_user) {
+        sender.textContent = "Deleted User";
+        sender.classList.add("deleted-user");
+    } else {
+        sender.textContent = msg.sender === username ? "You" : msg.sender;
+    }
+    
+    bubble.appendChild(sender);
+
+    // message text
+    const msgText = document.createElement("div");
+    msgText.style.whiteSpace = "pre-wrap"; // handle (shift+enter) in sent message
+    msgText.textContent = msg.message;
+    bubble.appendChild(msgText);
+
+    // horizontal line
+    const footer = document.createElement("div");
+    footer.className = "msg-footer";
+
+    const divider = document.createElement("div");
+    divider.className = "msg-divider";
+    footer.appendChild(divider);
+    
+    // timestamp
+    const time = document.createElement("small");
+    time.className = "timestamp text-muted d-block";
+    
+    time.textContent = formatTime(msg.sent_at);
+    
+    // Read status (only my messages)
+    if(msg.sender === username){
+
+        const readStatus = document.createElement("span");
+
+        readStatus.className = "read-status ms-1";
+
+        readStatus.dataset.messageId = msg.id;
+
+        readStatus.innerHTML =
+            (msg.is_read || msg.public_seen)
+            ? "✓✓"
+            : "✓";
+
+
+        if (msg.public_seen) {
+            readStatus.classList.add("black");
+        }
+
+        time.appendChild(readStatus);
+    }
+
+    //bubble.appendChild(time);
+    footer.appendChild(time);
+    bubble.appendChild(footer);
+    row.appendChild(bubble);
+    messagesDiv.appendChild(row);
+  });
+
+  //messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    if (wasNearBottom || messagesDiv.scrollHeight === 0) {
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+  }
+}
+
+// helper to append a single message row (used for incoming WebSocket messages)
+function appendMessageRow(msg) {
+  const messagesDiv = document.getElementById("messages");
+
+  // Check BEFORE adding the new message if the user is near the bottom
+  const wasNearBottom =
+      messagesDiv.scrollHeight -
+      messagesDiv.scrollTop -
+      messagesDiv.clientHeight < 80;
+  
+  const row = document.createElement("div");
+  row.className = msg.sender === username ? "message-row me" : "message-row other";
+
+  if (msg.sender !== username) {
+    const avatar = document.createElement("div");
+    avatar.className = "avatar-circle-public";
+    avatar.style.backgroundColor = msg.avatar_color;
+    avatar.textContent = (msg.sender || "?").charAt(0).toUpperCase();
+
+    // Store full username for reliable matching
+    avatar.setAttribute("data-username", msg.sender);
+
+    // Add status dot on public chat messages
+    const statusDot = document.createElement("span");
+    statusDot.className = `status-dot-public ${isUserOnline(msg.sender) ? 'status-online' : 'status-hidden'}`;
+    avatar.appendChild(statusDot);
+
+    row.appendChild(avatar);
+  }
+
+    const bubble = document.createElement("div");
+    bubble.className = msg.sender === username ? "message me" : "message other";
+
+    // sender
+    const sender = document.createElement("strong");
+    if (msg.deleted_user) {
+        sender.textContent = "Deleted User";
+        sender.classList.add("deleted-user");
+    } else {
+        sender.textContent = msg.sender === username ? "You" : msg.sender;
+    }
+
+    bubble.appendChild(sender);
+
+    // message text
+    const msgText = document.createElement("div");
+    msgText.style.whiteSpace = "pre-wrap"; // handle (shift+enter) for sent meaasge
+    msgText.textContent = msg.message;
+    bubble.appendChild(msgText);
+
+    // horizontal line
+    const footer = document.createElement("div");
+    footer.className = "msg-footer";
+
+    const divider = document.createElement("div");
+    divider.className = "msg-divider";
+    footer.appendChild(divider);
+
+    // timestamp
+    const time = document.createElement("small");
+    time.className = "timestamp text-muted d-block";
+
+    time.textContent = formatTime(msg.sent_at);
+
+    // Read status (only my messages)
+    if(msg.sender === username){
+
+        const readStatus = document.createElement("span");
+
+        readStatus.className = "read-status ms-1";
+
+        readStatus.dataset.messageId = msg.id;
+
+        readStatus.innerHTML =
+            (msg.is_read || msg.public_seen)
+            ? "✓✓"
+            : "✓";
+
+
+        if(msg.is_read || msg.public_seen){
+            readStatus.classList.add("blue");
+        }
+
+        time.appendChild(readStatus);
+    }
+
+    //bubble.appendChild(time);
+    footer.appendChild(time);
+    bubble.appendChild(footer);
+    row.appendChild(bubble);
+    messagesDiv.appendChild(row);
+
+    //messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    
+    // only scroll to bottom if the user was already near the bottom before the new message arrived
+    if (wasNearBottom) {
+        messagesDiv.scrollTo({
+            top: messagesDiv.scrollHeight,
+            behavior: "smooth"
+        });
+    }
+}
+
+function formatTime(sent_at) {
+    //if (!sent_at) return "Just now";
+    console.log("TIME RECEIVED:", sent_at);
+    return new Intl.DateTimeFormat("en-US", {
+        year: "numeric",
+        month: "short",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+        timeZone: "Asia/Yangon"
+    }).format(new Date(sent_at));
+}
+
+
+// Handle incoming WebSocket messages
+async function handleIncomingMessage(event) {
+  const data = JSON.parse(event.data);
+
+  // typing behavior
+  if(data.type === "typing"){
+
+    showTypingStatus(
+        data.username,
+        data.typing
+    );
+
+    return;
+}
+
+  if(data.type === "messages_seen"){
+
+      console.log(
+          "Messages seen by:",
+          data.reader
+      );
+  
+      updateReadStatus(data.last_read_id);
+  
+      return;
+  }
+
+  // Public chat read receipt
+  if(data.type === "public_message_seen"){
+
+      console.log(
+          "PUBLIC MESSAGE SEEN:",
+          data.message_id
+      );
+
+
+      const tick = document.querySelector(
+          `.read-status[data-message-id="${data.message_id}"]`
+      );
+
+
+      if(tick){
+
+          tick.innerHTML = "✓✓";
+
+          tick.classList.add("blue");
+
+      }
+
+
+      return;
+  }
+  
+
+  if (data.type === "message") {
+    
+    // Play sound immediately
+    if (data.sender !== username) {
+        document.getElementById("receiveSound").play();
+    } else {
+        document.getElementById("sendSound").play();
+    }
+
+    
+    // Public Chat
+    if (!currentReceiver && data.room_type === "public") {
+
+        appendMessageRow(data);
+        
+        // tell server we viewed public message
+        if(
+            data.sender !== username &&
+            ws &&
+            ws.readyState === WebSocket.OPEN
+        ){
+
+            ws.send(JSON.stringify({
+                type:"public_seen",
+                message_id:data.id
+            }));
+
+        }
+
+    }
+
+    // Private Chat
+    if (currentReceiver) {
+
+        if (
+            data.sender === currentReceiver ||
+            data.sender === username
+        ) {
+
+            appendMessageRow(data);
+            
+            // auto mark as read
+            if(
+                data.sender === currentReceiver &&
+                ws &&
+                ws.readyState === WebSocket.OPEN
+            ){
+
+                if(data.id > lastReadMessageId){
+
+                    lastReadMessageId = data.id;
+
+                    ws.send(JSON.stringify({
+                        type:"mark_read",
+                        receiver: currentReceiver
+                    }));
+
+                }
+
+            }
+
+        }
+    }
+
+    // Update recent chats
+    if (data.room_type === "private") {
+
+        let chatUser =
+            data.sender === username
+            ? data.receiver
+            : data.sender;
+
+        updateSidebarChat({
+            sender: chatUser,
+            last_sender: data.sender === username ? "You" : data.sender,
+            message: data.message,
+            sent_at: data.sent_at
+        });
+
+    }
+
+    return;
+  }
+
+
+  if(data.type === "chat_update"){
+
+    let chatUser;
+
+    // message from another user
+    if(data.sender !== username){
+        
+        chatUser = data.sender;
+
+        if(currentReceiver !== chatUser){
+            console.log("ADDING UNREAD BADGE FOR:", chatUser);
+            
+            unreadCounts[chatUser] = (unreadCounts[chatUser] || 0) + 1;
+        }
+
+        if(!document.querySelector(
+            `button[data-username="${chatUser}"]`
+        )){
+            newChatUsers[chatUser] = true;
+        }
+    }
+    else{
+        // my own sent message
+        chatUser = data.receiver;
+
+    }
+
+    updateSidebarChat({        
+        // calling from websocket
+        sender: chatUser,
+        avatar_color: data.avatar_color,
+        last_sender: data.last_sender,
+        message: data.message,
+        sent_at: data.sent_at
+
+    });
+
+    if(currentReceiver !== chatUser){
+        updateUnreadBadge(chatUser);
+    }
+
+    return;
+}
+
+  if (data.type === "presence") {
+
+    onlineUsers[data.username] = data.online;   // ✅ keep map updated
+
+    if(data.last_seen){
+        lastSeenUsers[data.username] = data.last_seen;
+    }
+    
+    updateUserStatus(
+        data.username, 
+        data.online,
+        data.last_seen
+    );
+
+    return; // stop here, don’t render as a chat bubble
+
+  }
+
+  if (data.type === "presence_init") {
+
+    // clear old online cache
+    /*Object.keys(onlineUsers).forEach(u => {
+        delete onlineUsers[u];
+    });*/
+    
+    data.users.forEach(u => {
+
+      onlineUsers[u.username] = u.online;     // ✅ keep map updated
+      if(u.last_seen){
+            lastSeenUsers[u.username] = u.last_seen;
+        }
+
+      updateUserStatus(u.username, u.online, u.last_seen);
+
+    });
+
+    updatePublicStats();
+    return;
+  }
+
+    if(data.type === "new_chat"){
+        
+        console.log("NEW CHAT CREATED:", data.username);
+
+        newChatUsers[data.username] = true;
+
+        setTimeout(()=>{
+            loadChats();
+        },100);
+
+        return;
+    }
+
+}
+
+
+// these four for typing behavior
+let isTyping = false;
+let typingTimer = null;
+let typingAnimationTimer = null;
+let typingDots = 0;
+
+let lastReadMessageId = 0;
+
+function updateUserStatus(username, online, last_seen=null) {
+  onlineUsers[username] = online;
+
+  // Update user buttons (sidebar)
+  const userButtons = document.querySelectorAll("#users button");
+
+  userButtons.forEach(btn => {
+    
+    if (btn.dataset.username === username) {
+      const dot = btn.querySelector(".status-dot");
+
+      if (dot) {
+          dot.className = `status-dot ${online ? "status-online" : "status-hidden"}`;
+      }
+  }
+  });
+
+  // Update top bar if currently chatting with this user
+  const headerUser = document.querySelector("#chatHeader .username");
+  if (headerUser && headerUser.textContent.trim() === username) {
+    const userInfo = headerUser.parentElement; // .user-info container
+
+    // Dot
+    //let statusDot = userInfo.querySelector(".status-dot");
+    //if (statusDot) {
+    //  statusDot.className = `status-dot ${online ? 'status-online' : 'status-offline'}`;
+    //}
+
+    // Text
+    let statusText = userInfo.querySelector(".status");
+    if (statusText) {
+
+        if(!online && last_seen){
+            lastSeenUsers[username] = last_seen;
+        }
+
+        statusText.textContent = online ? "online" : formatLastSeen(lastSeenUsers[username]);
+        statusText.className = `status ${online ? 'online-text' : 'offline-text'}`;
+      
+    }
+  }
+  
+  // Update public chat avatars
+  const chatAvatars = document.querySelectorAll(".avatar-circle-public");
+  chatAvatars.forEach(avatar => {
+    if (avatar.getAttribute("data-username") === username) {
+      const statusDot = avatar.querySelector(".status-dot-public");
+      if (statusDot) {
+        // can be placed last seen recently (status-offline)
+        statusDot.className = `status-dot-public ${online ? 'status-online' : 'status-hidden'}`;
+      }
+    }
+  });
+
+    // function call for total users calculation
+    updatePublicStats();
+}
+
+function isUserOnline(username) {
+  return !!onlineUsers[username];
+}
+
+  // Fetch PUBLIC messages
+  async function loadPublicMessages() {
+    const response = await fetch("/messages");
+    const data = await response.json();
+    renderMessages(data);
+
+    // Mark public messages as seen after opening Public Chat
+    data.forEach(msg => {
+
+        if(msg.sender !== username){
+
+            ws.send(JSON.stringify({
+                type: "public_seen",
+                message_id: msg.id
+            }));
+
+        }
+
+    });
+
+    // After rebuilding messages, re‑apply presence state
+    Object.keys(onlineUsers).forEach(u => {
+      updateUserStatus(u, onlineUsers[u], lastSeenUsers[u]);
+    });
+  }
+
+  // Fetch PRIVATE messages
+  async function loadMessagesForRoom(receiver) {
+    const response = await fetch("/messages?receiver=" 
+                                + encodeURIComponent(receiver) 
+                                + "&username=" + encodeURIComponent(username));
+    const data = await response.json();
+    renderMessages(data);
+
+    // After rebuilding messages, re‑apply presence state
+    Object.keys(onlineUsers).forEach(u => {
+      updateUserStatus(u, onlineUsers[u], lastSeenUsers[u]);
+    });
+  }
+
+
+// last seen format
+function formatLastSeen(time){
+
+    if(!time){
+        return "last seen recently";
+    }
+
+    const date = new Date(time);
+
+    if(isNaN(date.getTime())){
+        console.log("Invalid last_seen:", time);
+        return "last seen recently";
+    }
+
+
+    const diff = Math.floor(
+        //(new Date() - date) / 60000
+        (Date.now() - date.getTime()) / 60000
+    );
+
+
+    if(diff < 1)
+        return "last seen just now";
+
+
+    if(diff < 60)
+        return `last seen ${diff} min ago`;
+
+
+    const hours = Math.floor(diff / 60);
+
+
+    if(hours < 24)
+        return `last seen ${hours} hour ago`;
+
+
+    const days = Math.floor(hours / 24);
+
+    return `last seen ${days} day ago`;
+}
+
+
+// display function for typing behavior
+function showTypingStatus(user, typing){
+
+    // only affect current private chat
+    if(currentReceiver !== user){
+        return;
+    }
+
+
+    const status = document.querySelector(
+        "#chatHeader .status"
+    );
+
+
+    if(!status){
+        return;
+    }
+
+
+    if(typing){
+
+        status.className = "status online-text";
+
+
+        if(!typingAnimationTimer){
+
+            typingDots = 0;
+
+            typingAnimationTimer = setInterval(()=>{
+
+                typingDots++;
+
+                if(typingDots > 3){
+                    typingDots = 0;
+                }
+
+
+                status.textContent = ".".repeat(typingDots) + "typing";
+
+            },400);
+
+        }
+
+
+    }else{
+
+        // stop animation
+        if(typingAnimationTimer){
+
+            clearInterval(typingAnimationTimer);
+
+            typingAnimationTimer = null;
+
+        }
+
+
+        status.textContent =
+            isUserOnline(user)
+            ? "online"
+            : formatLastSeen(lastSeenUsers[user]);
+
+
+        status.className =
+            `status ${
+                isUserOnline(user)
+                ? "online-text"
+                : "offline-text"
+            }`;
+
+    }
+
+}
+
+
+// Helper to connect WebSocket
+function connectWebSocket(url) {
+
+    const currentSocketId = ++socketId;
+    let intentionalClose = false;
+
+  // Cancel previous reconnect timer
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+
+  // Close old connection intentionally
+  if (ws) {
+
+    ws.onclose = null;
+    ws.onerror = null;
+
+    intentionalClose = true;
+
+    ws.close();
+  }
+
+  ws = new WebSocket(url);
+
+
+  //document.getElementById("sendBtn").disabled = true;
+  const sendBtn = document.getElementById("sendBtn");
+
+  if(sendBtn){
+      sendBtn.disabled = true;
+  }
+
+  ws.onopen = () => {
+
+        if(currentSocketId !== socketId){
+            return;
+        }
+
+        console.log("WS OPEN");
+        console.log("Connected to " + url);
+
+        //manualClose = false;
+
+        if(sendBtn){
+            sendBtn.disabled = false;
+        }
+
+        // only private chat
+        if(currentReceiver && url.includes("receiver=")){
+
+            if(ws.readyState === WebSocket.OPEN){
+
+                ws.send(JSON.stringify({
+                    type:"mark_read",
+                receiver: currentReceiver
+                }));
+
+            }
+
+            console.log("Private chat opened -> mark_read sent");
+        }
+        
+
+        // Wait until websocket is connected before sending public_seen
+        // If currently in Public Chat
+        if (
+            currentReceiver === null &&
+            currentSocketId === socketId
+        ){
+            loadPublicMessages();
+        }
+
+        // refresh recent chats after websocket ready
+        setTimeout(() => {
+
+            if(currentSocketId !== socketId){
+                return;
+            }
+            loadChats();
+
+        }, 500);
+  };
+
+
+  ws.onmessage = handleIncomingMessage;
+
+  ws.onclose = (e) => {
+    
+    console.log("WS CLOSED", e.code);
+    // Ignore old websocket closing
+    if(currentSocketId !== socketId){
+        console.log("Old websocket ignored");
+        return;
+    }
+
+    console.log("Closed:", e.code, e.reason);
+
+    //document.getElementById("sendBtn").disabled = true;
+    if(currentSocketId === socketId){
+
+        document.getElementById("sendBtn").disabled = true;
+
+    }
+
+
+    // Ignore intentional close
+    if (intentionalClose) {
+      console.log("Manual close, no reconnect");
+      return;
+    }
+
+
+    reconnectTimer = setTimeout(() => {
+
+      console.log("Attempting reconnect...");
+
+      connectWebSocket(url);
+
+      // refresh recent chats after reconnect
+      loadChats();
+
+    },3000); // auto reconnect after 3s
+    
+  };
+
+
+  ws.onerror = (err) => {
+    console.error("WebSocket error:", err);
+  };
+}
+
+
+// Send message function
+function sendMessage() {
+  let input = document.getElementById("messageText");
+  if (input.value.trim() !== "") {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      console.log("ws.readyState =", ws.readyState);
+      alert("Connection not ready yet. Please wait a moment.");
+      return;
+    }
+
+    ws.send(JSON.stringify({
+      sender: username,
+      message: input.value
+    }));
+
+    //document.getElementById("sendSound").play();
+    input.value = "";
+
+    input.style.height = "auto";
+    input.style.height = "24px";
+    input.style.overflowY = "hidden";
+    input.style.overflowY = "hidden";
+  }
+}
+
+// PUBLIC Chat button
+const publicBtn = document.getElementById("publicChat");
+publicBtn.className = "btn BtnPS w-100 mb-2";
+publicBtn.onclick = async function () {
+    
+    // If leaving a private chat, mark it as read
+    if (currentReceiver) {
+        markChatAsRead(currentReceiver);
+
+        unreadCounts[currentReceiver] = 0;
+        updateUnreadBadge(currentReceiver);
+
+        delete newChatUsers[currentReceiver];
+    }  
+
+    currentReceiver = null;
+
+    connectWebSocket(
+        getWebSocketUrl(
+            "/ws?username=" + encodeURIComponent(username)
+        )
+    );
+
+    //loadPublicMessages();
+    
+    document.getElementById("chatHeader").innerHTML = `
+
+        <div class="left">
+        <span class="username" style="display:flex; align-items:center; gap:5px;">
+            <img src="/static/UCSP_logo.png" style="width: 35px; height: 35px;">
+            UCSP Group Chat
+        </span>
+        </div>
+
+        <div id="publicStats" class="small">
+        0 users • 0 online
+        </div>
+    `;
+
+    if(window.innerWidth < 768){
+        sidebar.classList.remove("active");
+    }
+    updatePublicStats();
+    };
+
+
+
+// add new private chat
+async function loadNewChatUsers(){
+
+    const response = await fetch("/users");
+    const users = await response.json();
+
+    const box = document.getElementById("newChatUsers");
+
+    box.innerHTML = "";
+
+
+    users.forEach(user=>{
+
+        if(user.username === username)
+            return;
+
+
+        const btn = document.createElement("button");
+
+        btn.className = "btn chat-user-btn w-100 mb-2";
+
+        btn.dataset.username = user.username;
+
+
+        btn.innerHTML = `
+            <span class="mini-avatar"
+                    style="background:${user.avatar_color}">
+                    ${user.username.charAt(0).toUpperCase()}
+                </span>
+
+            ${user.username}
+
+            <span class="status-dot ${
+                user.online
+                ? "status-online"
+                : "status-hidden"
+            }"></span>
+        `;
+
+
+        btn.onclick = function(){
+
+            currentReceiver = user.username;
+
+
+            connectWebSocket(
+                getWebSocketUrl(
+                    "/ws?username="
+                    + encodeURIComponent(username)
+                    + "&receiver="
+                    + encodeURIComponent(user.username)
+                )
+            );
+
+
+            loadMessagesForRoom(user.username);
+
+            showPrivateHeader(user.username);
+
+
+            // hide new chat list
+            box.style.display="none";
+
+
+            // refresh recent chats
+            loadChats();
+
+        };
+
+
+        box.appendChild(btn);
+
+    });
+
+}
+
+
+// Load users list
+
+async function loadUsers() {
+  const response = await fetch("/users");
+  const users = await response.json();
+  
+  totalUsersCount = users.length;
+
+  const userDiv = document.getElementById("users");
+  userDiv.innerHTML = "";
+
+  users.forEach(user => {
+    if (user.username === username) return;
+
+    let privateBtn = document.createElement("button");
+    privateBtn.className = "btn chat-user-btn w-100 mb-2";
+    privateBtn.dataset.username = user.username;
+    // ✅ Always include the dot span from the start
+    privateBtn.innerHTML = ` 
+                    <span class="status-dot ${user.online ? 'status-online' : 'status-hidden'}"></span>
+                    <i class="fa-solid fa-circle-user" style="color: rgb(45, 144, 197);"></i>
+                    <strong> ${user.username} </strong>
+                `;
+    
+
+    privateBtn.onclick = async function () {
+
+        markChatAsRead(user.username);
+
+        unreadCounts[user.username] = 0;
+        updateUnreadBadge(user.username);
+      //refreshUnreadBadge(user.username);
+        
+      currentReceiver = user.username;
+
+      connectWebSocket(
+        getWebSocketUrl(
+          "/ws?username=" 
+          + encodeURIComponent(username) 
+          + "&receiver=" 
+          + encodeURIComponent(user.username)
+        )
+      );
+
+      //document.getElementById("messages").innerHTML = ""; manual clear is not needed anymore
+      loadMessagesForRoom(user.username);
+
+      setTimeout(()=>{
+            markChatAsRead(user.username);
+        },300);
+
+      const header = document.getElementById("chatHeader");
+      header.innerHTML = `
+
+          <div class="left d-flex align-items-center">
+
+              <div class="header-avatar"
+                   style="background-color:${user.avatar_color}">
+
+                  ${user.username.charAt(0).toUpperCase()}
+
+              </div>
+
+              <div class="user-info ms-2">
+                  <span class="username">
+                      ${user.username}
+                  </span>
+                  <br>
+
+                  <span class="status ${isUserOnline(user.username) ? 'online-text' : 'offline-text'}">
+                      ${isUserOnline(user.username) ? 'online' : 'offline'}
+                  </span>
+              </div>
+
+          </div>
+
+
+          <div class="actions">
+
+              <i class="fas fa-ellipsis-v" id="chatMenuBtn"></i>
+
+          </div>
+
+          `;
+      if(window.innerWidth < 768){
+          sidebar.classList.remove("active");
+      }
+    };
+
+    userDiv.appendChild(privateBtn);
+  });
+  Object.keys(onlineUsers).forEach(u=>{
+    updateUserStatus(u, onlineUsers[u], lastSeenUsers[u]);
+});
+
+  // function call for total calculated users
+  updatePublicStats();
+}
+
+
+let chatsRequestId = 0;
+// Load chat
+async function loadChats() {
+    //console.log("LOAD CHATS START");
+    const requestId = ++chatsRequestId;
+
+    try {
+
+        const userResponse = await fetch("/users");
+
+
+        if(!userResponse.ok){
+            throw new Error(
+                "Failed loading users: " + userResponse.status
+            );
+        }
+
+
+        const users = await userResponse.json();
+        if(requestId !== chatsRequestId){
+            return;
+        }
+
+        totalUsersCount = users.length;
+
+        const response = await fetch(
+            "/chats?username=" + encodeURIComponent(username)
+        );
+
+        const chats = await response.json();
+        const uniqueChats = [
+            ...new Map(
+                chats.map(chat => [chat.username, chat])
+            ).values()
+        ];
+
+        console.log("UNIQUE CHATS:", uniqueChats);
+
+
+        if(requestId !== chatsRequestId){
+            return;
+        }
+
+        console.log(
+            "LOAD CHATS:",
+            uniqueChats.map(c => ({
+                user:c.username,
+                dbUnread:c.unread_count,
+                jsUnread:unreadCounts[c.username]
+            }))
+        );
+        
+        // Sync unread counts from database
+        uniqueChats.forEach(chat => {
+
+            if(currentReceiver === chat.username){
+
+                unreadCounts[chat.username] = 0;
+
+            }
+            else if(unreadCounts[chat.username] === undefined){
+
+                unreadCounts[chat.username] = chat.unread_count;
+
+            }
+
+        });
+
+        const userDiv = document.getElementById("users");
+
+        const activeUser = currentReceiver;
+        userDiv.innerHTML = "";
+
+        uniqueChats.forEach(chat => {
+
+            const isNewChat = newChatUsers[chat.username];
+
+            const isOnline =
+                onlineUsers[chat.username] !== undefined
+                ? onlineUsers[chat.username]
+                : false;
+
+            const btn = document.createElement("button");
+
+            btn.className = "btn chat-user-btn w-100 mb-2";
+
+            btn.dataset.username = chat.username;
+
+            btn.innerHTML = `
+                <div class="d-flex justify-content-between align-items-start">
+                    
+                    <div class="text-start flex-grow-1">
+
+                        <!-- User name + online status -->
+                            <div class="d-flex align-items-center">
+                                <span class="mini-avatar"
+                                    style="background:${chat.avatar_color}">
+                                    ${chat.username.charAt(0).toUpperCase()}
+                                </span>
+                                <strong>${chat.username}</strong>
+                                <span class="status-dot ${isOnline ? "status-online" : "status-hidden"}"></span>                    
+                            </div>
+
+                        <!-- Sender name : message -->
+                            <div class="text-muted small message-preview" style="margin-left: 40px">
+                                ${
+                                    (chat.last_sender ? chat.last_sender + ": " : "")
+                                    + (chat.last_message || "")
+                                }
+                            </div>
+                                        <!-- Time -->
+                            <div class="text-muted small" style="margin-left: 40px">
+                                <small>
+                                ${chat.sent_at ? formatTime(chat.sent_at) : ""}
+                                </small>
+                            </div>
+
+                    </div>
+                        <span class="unread-badge"
+                            style="${unreadCounts[chat.username] ? '' : 'display:none'}">
+                            ${unreadCounts[chat.username] || 0}
+                        </span>
+                    
+                                ${
+                                    isNewChat
+                                    ? `
+                                        <span
+                                            class="badge rounded-pill bg-primary ms-1"
+                                            style="font-size:11px; float: right; margin-top: 1px;"
+                                        >
+                                            New
+                                        </span>
+                                    `
+                                    : ""
+                                }
+                </div>
+            `;
+
+            
+            btn.onclick = async function () {
+
+                currentReceiver = chat.username;
+                lastReadMessageId = 0;
+
+                delete newChatUsers[chat.username];
+
+                chat.unread_count = 0;
+                unreadCounts[chat.username] = 0;
+                
+                updateUnreadBadge(chat.username);
+
+                connectWebSocket(
+                    getWebSocketUrl(
+                        "/ws?username="
+                        + encodeURIComponent(username)
+                        + "&receiver="
+                        + encodeURIComponent(chat.username)
+                    )
+                );
+
+                loadMessagesForRoom(chat.username);
+
+                //setTimeout(()=>{
+                //    markChatAsRead(chat.username);
+                //},300);
+
+                showPrivateHeader(chat);
+
+                userSearch.value = "";
+                clearSearch.style.display = "none";
+                document.getElementById("newChatUsers").style.display = "none";
+
+                if(window.innerWidth < 768){
+                    sidebar.classList.remove("active");
+                }
+
+            };
+
+            userDiv.appendChild(btn);
+
+        });
+
+        // remove duplicate chat buttons
+        //const seen = new Set();
+
+        //document.querySelectorAll("#users button").forEach(btn => {
+        //    const name = btn.dataset.username;
+
+        //    if (seen.has(name)) {
+        //        btn.remove();
+        //    } else {
+        //        seen.add(name);
+        //    }
+        //});
+
+
+        // remove old active state
+        document
+        .querySelectorAll("#users button")
+        .forEach(btn=>{
+            btn.classList.remove("active-chat");
+        });
+
+        // restore current active chat
+        if(activeUser){
+
+            const activeBtn =
+                document.querySelector(
+                    `button[data-username="${activeUser}"]`
+                );
+
+            if(activeBtn){
+
+                activeBtn.classList.add("active-chat");
+
+            }
+
+        }
+        
+        console.log(
+            "SIDEBAR BUTTONS:",
+            document.querySelectorAll("#users button").length
+        );
+    
+    } catch(err){
+
+        console.error("loadChats error:", err);
+
+    }
+
+}
+
+function showPrivateHeader(user){
+
+    document.getElementById("chatHeader").innerHTML = `
+        <div class="left d-flex align-items-center">
+
+            <div class="header-avatar"
+                 style="background-color:${user.avatar_color}">
+
+                ${user.username.charAt(0).toUpperCase()}
+                
+            </div>
+
+            <div class="user-info ms-2">
+
+                <span class="username">${user.username}</span>
+
+                <br>
+
+                <span class="status ${isUserOnline(user.username) ? "online-text" : "offline-text"}">
+
+                    ${isUserOnline(user.username) ? "online" : formatLastSeen(lastSeenUsers[user.username])}
+
+                </span>
+
+            </div>
+
+        </div>
+
+        <div class="actions">
+
+            <i class="fas fa-ellipsis-v" id="chatMenuBtn"></i>
+
+        </div>
+    `;
+}
+
+
+// for clear chat history
+document.addEventListener("click", function(e){
+
+    const menuBtn = e.target.closest("#chatMenuBtn");
+
+    if(menuBtn){
+
+        e.stopPropagation();
+
+        let menu = document.getElementById("chatActionMenu");
+
+
+        if(menu){
+            menu.remove();
+            return;
+        }
+
+
+        menu = document.createElement("div");
+
+        menu.id = "chatActionMenu";
+
+        menu.innerHTML = `
+            <div class="chat-menu-item" id="deleteChatBtn">
+                <i class="fa-solid fa-trash"></i>
+                Clear chat history
+            </div>
+        `;
+
+        menu.style.position = "absolute";
+        menu.style.right = "20px";
+        menu.style.top = "60px";
+        document.body.appendChild(menu);
+
+
+        document.getElementById("deleteChatBtn").onclick = clearCurrentChat;
+
+    }
+
+
+});
+// Close ⋮ menu when clicking elsewhere
+document.addEventListener("click", function(e){
+
+    const menu = document.getElementById("chatActionMenu");
+
+    if(
+        menu &&
+        !e.target.closest("#chatActionMenu") &&
+        !e.target.closest("#chatMenuBtn")
+    ){
+        menu.remove();
+    }
+
+});
+
+
+// private chat history clear function
+async function clearCurrentChat(){
+
+    if(!currentReceiver)
+        return;
+
+
+    if(!confirm("Are you sure to clear chat history?")){
+        return;
+    }
+
+    const chatUser = currentReceiver;
+    //const deletedUser = currentReceiver;
+    
+    // save avatar in a variable
+    const oldAvatar =
+        document.querySelector(
+            `button[data-username="${chatUser}"] .mini-avatar`
+        )?.style.background || "#999";
+
+        
+    const response = await fetch(
+        "/clear_chat?username="
+        + encodeURIComponent(username)
+        + "&contact_username="
+        + encodeURIComponent(chatUser),
+        {
+            method:"POST"
+        }
+    );
+
+
+    const result = await response.json();
+
+
+    if(result.success){
+        
+        //document.querySelector(
+        //    `button[data-username="${currentReceiver}"]`
+        //)?.remove();
+
+        // close three dots menu
+        const menu = document.getElementById("chatActionMenu");
+        if(menu){
+            menu.remove();
+        }
+        
+        // clear current private state
+        //currentReceiver = null;
+
+        // stay in current private chat
+        currentReceiver = chatUser;
+        lastReadMessageId = 0;
+
+        // clear current messages
+        document.getElementById("messages").innerHTML = "";
+
+        //await loadMessagesForRoom(deletedUser);
+
+        // reload sidebar but keep current user
+        await loadChats();
+        console.log("Sidebar reloaded after clear");
+
+        // restore header
+        showPrivateHeader({
+            username: chatUser,
+            avatar_color: oldAvatar
+        });
+
+        // popup message
+        showToast(
+            "Chat history cleared successfully",
+            "fa-trash"
+        );
+    }
+
+}
+
+
+// auto refresh recent chat
+function updateSidebarChat(msg){
+    
+    // Ignore public chat messages
+    let chatUser = msg.sender;
+
+    if(!chatUser){
+        return;
+    }
+
+    const usersDiv = document.getElementById("users");
+
+    // Find existing chat button
+    let buttons = usersDiv.querySelectorAll(
+        `button[data-username="${chatUser}"]`
+    );
+
+    // remove duplicate buttons if already exists
+    if (buttons.length > 1) {
+        buttons.forEach((b, index) => {
+            if (index > 0) {
+                b.remove();
+            }
+        });
+    }
+
+    let btn = usersDiv.querySelector(
+        `button[data-username="${chatUser}"]`
+    );
+
+    // If chat does not exist yet (first message)
+    if(!btn){
+
+        btn = document.createElement("button");
+        btn.className = "btn chat-user-btn w-100 mb-2";
+        btn.dataset.username = chatUser;
+        btn.dataset.avatarColor = msg.avatar_color || "";
+
+        btn.onclick = function(){
+
+            connectWebSocket(
+                getWebSocketUrl(
+                    "/ws?username="
+                    + encodeURIComponent(username)
+                    + "&receiver="
+                    + encodeURIComponent(chatUser)
+                )
+            );
+
+            loadMessagesForRoom(chatUser);
+            showPrivateHeader({
+                username: chatUser,
+                avatar_color: msg.avatar_color
+            });
+
+            if(window.innerWidth < 768){
+                sidebar.classList.remove("active");
+            }
+        };
+
+        // Add new chat at top
+        if (btn.parentElement !== usersDiv) {
+            usersDiv.prepend(btn);
+        }
+    }
+
+    if(msg.avatar_color){
+        btn.dataset.avatarColor = msg.avatar_color;
+    }
+
+    const currentUnread = unreadCounts[chatUser] || 0;
+    const currentOnline = onlineUsers[chatUser] === true;
+
+    let currentAvatarColor = 
+        msg.avatar_color ||
+        btn.dataset.avatarColor ||
+        btn.querySelector(".mini-avatar")?.style.background ||
+        "#999";
+
+    btn.dataset.avatarColor = currentAvatarColor;
+
+    // Update button content
+    btn.innerHTML = `
+        <div class="d-flex justify-content-between align-items-start">
+            <div class="text-start flex-grow-1">
+                <div class="d-flex align-items-center">
+
+                    <span class="mini-avatar"
+                          style="background:${currentAvatarColor}">
+
+                        ${chatUser.charAt(0).toUpperCase()}
+
+                    </span>
+                    <strong>${chatUser}</strong>
+
+                    <span class="status-dot ${
+                        currentOnline
+                        ? "status-online"
+                        : "status-hidden"
+                    }"></span>
+
+                </div>
+                <div class="text-muted small message-preview" style="margin-left: 40px">
+                    ${msg.last_sender || msg.sender}: ${msg.message}
+                </div>
+                <div class="text-muted small" style="margin-left: 40px">                    
+                    <small>
+                      ${formatTime(msg.sent_at)}
+                    </small>
+                </div>
+
+            </div>            
+            <span class="unread-badge" 
+                  style="${currentUnread  ? '' : 'display:none'}">
+                  ${currentUnread}
+            </span>
+                ${
+                    newChatUsers[chatUser]
+                    ?
+                    `
+                    <span 
+                        class="badge rounded-pill bg-primary ms-1"
+                        style="font-size:11px; float: right; margin-top: 1px;">
+                        New
+                    </span>
+                    `
+                    :
+                    ""
+                }
+        </div>
+
+    `;
+
+    // Move this chat to the top
+    usersDiv.prepend(btn);
+
+    // restore online dot after rebuilding
+    updateUserStatus(
+        chatUser,
+        onlineUsers[chatUser] === true
+    );
+}
+
+// noti Badge
+function refreshUnreadBadge(chatUser){
+    const btn = document.querySelector(
+        `button[data-username="${chatUser}"]`
+    );
+
+    if(!btn) return;
+
+    let badge = btn.querySelector(".unread-badge");
+
+    if(unreadCounts[chatUser] > 0){
+
+        if(!badge){
+            badge = document.createElement("span");
+            badge.className = "unread-badge";
+            btn.appendChild(badge);
+        }
+
+        badge.textContent = unreadCounts[chatUser];
+
+    }else{
+        if(badge){
+            badge.remove();
+        }
+    }
+}
+
+
+function updateUnreadBadge(chatUser) {
+
+    const btn = document.querySelector(
+        `button[data-username="${chatUser}"]`
+    );
+
+    if (!btn) return;
+
+    const badge = btn.querySelector(".unread-badge");
+
+    if (!badge) return;
+
+    if (unreadCounts[chatUser] > 0) {
+        badge.textContent = unreadCounts[chatUser];
+        badge.style.display = "flex";
+    } else {
+        badge.style.display = "none";
+    }
+}
+
+
+function getWebSocketUrl(path) {
+    const protocol = location.protocol === "https:" 
+        ? "wss://" 
+        : "ws://";
+
+    return protocol + location.host + path;
+}
+
+
+// Alert added user
+    function showToast(message, icon = "fa-circle-check"){
+
+        const toast = document.createElement("div");
+        toast.className = "chat-toast";
+
+        toast.innerHTML = `
+            <i class="fa-solid ${icon}"></i>
+            <span>${message}</span>
+        `;
+
+        document.getElementById("toastBox").appendChild(toast);
+
+        setTimeout(()=>{
+            toast.remove();
+        },3000);
+    }
+
+// Run on page load
+window.onload = async function () {
+
+  // Bind Send button
+  document.getElementById("sendBtn").onclick = sendMessage;
+  document.getElementById("messageText").addEventListener("keydown", function (e) {
+
+    if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+    }
+  });
+
+  
+  // Initial WebSocket + data load
+  //connectWebSocket("ws://127.0.0.1:8000/ws?username=" + encodeURIComponent(username));
+  const protocol = location.protocol === "https:" ? "wss://" : "ws://";
+
+  connectWebSocket(
+      getWebSocketUrl(
+           "/ws?username=" + encodeURIComponent(username)
+      )
+  );
+
+  //loadUsers();
+  await loadChats();
+  await loadPublicMessages();
+
+  document.getElementById("chatHeader").innerHTML = `
+    <div class="left">
+      <span class="username" style="display:flex; align-items:center; gap:5px;">
+        <img src="/static/UCSP_logo.png" style="width: 35px; height: 35px;">
+        UCSP Group Chat
+      </span>
+    </div>
+
+    <div id="publicStats" class="small">
+        0 users • 0 online
+    </div>
+  `;
+  updatePublicStats();
+
+  // Scroll button
+  const messagesDiv = document.getElementById("messages");
+  const scrollBtn = document.getElementById("scrollBottomBtn");
+
+  messagesDiv.addEventListener("scroll", () => {
+
+      const nearBottom =
+          messagesDiv.scrollHeight -
+          messagesDiv.scrollTop -
+          messagesDiv.clientHeight < 80;
+
+      if (nearBottom) {
+          scrollBtn.style.display = "none";
+      } else {
+          scrollBtn.style.display = "block";
+      }
+  });
+
+        scrollBtn.onclick = () => {
+        messagesDiv.scrollTo({
+            top: messagesDiv.scrollHeight,
+            behavior: "smooth"
+        });
+    };
+
+
+    /* Logout */
+    document.getElementById("logoutBtn").onclick = function () {
+
+        // Close websocket first
+        manualClose = true;
+
+        if (ws) {
+            ws.close();
+        }
+
+        window.location.href = "/logout";
+    };
+
+    // Welcome alert
+    const welcomeAlert = document.getElementById("welcomeAlert");
+
+    welcomeAlert.style.display = "block";
+    welcomeAlert.classList.add("show");
+
+    setTimeout(() => {
+        welcomeAlert.classList.remove("show");
+
+        setTimeout(() => {
+            welcomeAlert.style.display = "none";
+        }, 300);
+
+    }, 3000);
+
+};
+
+  // calculate total users and online users
+  function updatePublicStats() {
+
+      const totalUsers = totalUsersCount;
+
+      const onlineCount = Object.values(onlineUsers)
+          .filter(v => v).length;
+
+      const stats = document.getElementById("publicStats");
+
+      if (stats) {
+          stats.textContent = `${totalUsers} users • ${onlineCount} online`;
+      }
+  }
+
+    // Humburger
+    const menuBtn = document.getElementById("menuBtn");
+    const closeSidebar = document.getElementById("closeSidebar");
+    const sidebar = document.getElementById("sidebar");
+
+
+    menuBtn.onclick = function(){
+        sidebar.classList.toggle("active");
+    };
+    closeSidebar.onclick = function(){
+        sidebar.classList.remove("active");
+    };
+
+
+
+
+    // SearchBox
+    const userSearch = document.getElementById("userSearch");
+    const clearSearch = document.getElementById("clearSearch");
+
+    let searchRequestId = 0;
+    
+    userSearch.addEventListener("input", async function(){
+        const requestId = ++searchRequestId;
+        const keyword = this.value.toLowerCase();
+
+        clearSearch.style.display = keyword ? "block" : "none";
+
+        // Search existing recent chats
+        document.querySelectorAll("#users button")
+        .forEach(btn=>{
+
+            const name = btn.dataset.username.toLowerCase();
+
+            btn.style.display =
+                name.includes(keyword)
+                ? "block"
+                : "none";
+
+        });
+
+
+        // Search new users
+        const box = document.getElementById("newChatUsers");
+
+        box.innerHTML = "";
+
+        if(!keyword){
+            box.style.display="none";
+            return;
+        }
+
+        const response = await fetch(
+            "/search_users?username=" 
+            + encodeURIComponent(username)
+            + "&q="
+            + encodeURIComponent(keyword)
+        );
+
+        const users = await response.json();
+
+        if(requestId !== searchRequestId){
+            return;
+        }
+
+        const uniqueUsers = [
+            ...new Map(
+                users.map(u => [u.username, u])
+            ).values()
+        ];
+
+        uniqueUsers.forEach(user=>{
+
+            if(user.username === username)
+                return;
+
+            // already in recent chat?
+            const exists =
+                document.querySelector(
+                    `#users button[data-username="${user.username}"]`
+                );
+
+            if(exists || user.is_recent)
+                return;
+
+            if(user.username.toLowerCase().includes(keyword)){
+
+                const btn = document.createElement("button");
+
+                btn.className = "btn chat-user-btn w-100 mb-2";
+
+                btn.dataset.username = user.username;
+
+                btn.innerHTML = `
+                    <span class="mini-avatar"
+                        style="background:${user.avatar_color}">
+                        ${user.username.charAt(0).toUpperCase()}
+                    </span>
+
+                    <strong>${user.username}</strong>
+
+                    <i class="fa-solid fa-plus float-end mt-1"
+                    style="color:#1984be"></i>
+                `;
+
+                btn.onclick = async function(){
+                    console.log("CLICK SEARCH USER:", user.username);
+                    currentReceiver = user.username;
+
+                    // create recent chat first
+                    const response = await fetch(
+                        "/add_recent_chat?username="
+                        + encodeURIComponent(username)
+                        + "&contact_username="
+                        + encodeURIComponent(user.username),
+                        {
+                            method: "POST"
+                        }
+                    );
+
+                    const result = await response.json();
+                        showToast(`${user.username} is added to Recent Chats.`);
+                    
+
+                    connectWebSocket(
+                        
+                        getWebSocketUrl(
+                            "/ws?username="
+                            + encodeURIComponent(username)
+                            + "&receiver="
+                            + encodeURIComponent(user.username)
+                        )
+                        
+                    );
+
+                    loadMessagesForRoom(user.username);
+                    showPrivateHeader(user);
+
+                    loadChats();
+
+                    box.style.display="none";
+                    userSearch.value="";
+                    clearSearch.style.display = "none";
+
+                    //document.querySelectorAll("#users button")
+                    //.forEach(btn=>{
+                    //    btn.style.display = "block";
+                    //});
+                };
+
+                box.appendChild(btn);
+            }
+
+        });
+
+
+        box.style.display =
+            box.children.length ? "block" : "none";
+
+    });
+
+
+// check read/unread message
+function markChatAsRead(){
+
+    // only private chat
+    if(!currentReceiver){
+        return;
+    }
+
+    unreadCounts[currentReceiver] = 0;
+
+    updateUnreadBadge(currentReceiver);
+
+    if(ws && ws.readyState === WebSocket.OPEN){
+
+        ws.send(JSON.stringify({
+            type:"mark_read",
+            receiver: currentReceiver
+        }));
+
+        console.log("sent mark_read", currentReceiver);
+    }
+}
+
+
+    clearSearch.onclick = function(){
+
+        userSearch.value = "";
+
+        // show recent chats again
+        document.querySelectorAll("#users button")
+        .forEach(btn=>{
+            btn.style.display="block";
+        });
+
+        // remove search result users (+ icon)
+        const box = document.getElementById("newChatUsers");
+
+        box.innerHTML = "";
+        box.style.display = "none";
+
+        clearSearch.style.display="none";
+
+        userSearch.focus();
+    };
+
+    // message text area
+    const textarea = document.getElementById("messageText");
+
+    textarea.addEventListener("input", function () {
+
+        this.style.height = "0px";
+
+        this.style.height = Math.min(this.scrollHeight, 160) + "px";
+
+        this.style.overflowY =
+            this.scrollHeight > 150 ? "auto" : "hidden";
+
+
+        // Private chat only
+        if (!currentReceiver) return;
+
+        if (!isTyping) {
+            isTyping = true;
+
+            ws.send(JSON.stringify({
+                type: "typing"
+            }));
+        }
+
+        clearTimeout(typingTimer);
+
+        typingTimer = setTimeout(() => {
+
+            isTyping = false;
+
+            ws.send(JSON.stringify({
+                type: "stop_typing"
+            }));
+
+        }, 1500);
+
+    });
+
+function updateReadStatus(lastReadId){
+
+    document
+    .querySelectorAll(".read-status")
+    .forEach(status=>{
+
+        const messageId =
+            Number(status.dataset.messageId);
+
+
+        if(messageId <= lastReadId){
+
+            status.innerHTML = "✓✓";
+
+            status.classList.add("read");
+
+        }
+
+    });
+
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <title>Register</title>
+
+  <link rel="stylesheet" href="/static/Bootstrap-5.3.8/css/bootstrap.min.css">
+
+  <style>
+    @media(max-width:576px){
+
+      .card{
+        padding:1.5rem !important;
+      }
+
+      h2{
+        font-size:1.6rem;
+      }
+
+      .form-control{
+        font-size:16px; /* prevents iOS zoom */
+      }
+
+    }
+  </style>
+
+</head>
+
+<body class="bg-light d-flex align-items-center justify-content-center min-vh-100 p-3">
+
+
+  <div class="card shadow-sm p-4 w-100" style="max-width:400px;">
+
+    <h2 class="text-center mb-4">
+      Register
+    </h2>
+
+
+    <form action="/register" method="post">
+
+
+      <div class="mb-3">
+
+        <label for="username" class="form-label">
+          Username
+        </label>
+
+        <input 
+          id="username"
+          name="username"
+          type="text"
+          class="form-control"
+          placeholder="Enter username"
+          autocomplete="username"
+          required>
+
+      </div>
+
+
+
+      <div class="mb-3">
+
+        <label for="password" class="form-label">
+          Password
+        </label>
+
+        <input 
+          id="password"
+          name="password"
+          type="password"
+          class="form-control"
+          placeholder="Enter password"
+          autocomplete="new-password"
+          required>
+
+      </div>
+
+
+
+      <button type="submit" class="btn btn-success w-100">
+        Register
+      </button>
+
+
+    </form>
+
+
+
+    <p class="text-center mt-3 mb-0">
+
+      Already have an account?
+
+      <a href="/login" class="text-decoration-none">
+        Login
+      </a>
+
+    </p>
+
+
+  </div>
+
+
+
+  <script src="/static/Bootstrap-5.3.8/js/bootstrap.bundle.min.js"></script>
+
+</body>
+</html>

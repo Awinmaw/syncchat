@@ -1,0 +1,62 @@
+<body class="bg-light">
+
+<div class="container-fluid">
+  <div class="row vh-100">
+
+    <!-- Sidebar -->
+    <div class="col-3 bg-white border-end p-3">
+
+      <h4>SyncChat</h4>
+
+      <button class="btn btn-success w-100 mb-3" id="publicChat">
+        🌐 Public Chat
+      </button>
+
+      <h6 class="text-muted">Users</h6>
+
+      <div id="users"></div>
+
+    </div>
+
+    <!-- Chat Area -->
+    <div class="col-9 d-flex justify-content-center align-items-center">
+
+      <div class="card shadow-sm p-4"
+           style="max-width:700px;width:100%;">
+
+        <h2 class="text-center">SyncChat</h2>
+
+        <h6 class="text-center text-muted mb-3">
+            Welcome {{ username }}
+        </h6>
+
+        <div id="messages"
+             class="border rounded p-3 mb-3"
+             style="height:400px;overflow-y:auto;">
+        </div>
+
+        <div class="input-group">
+
+          <input
+              id="messageText"
+              type="text"
+              class="form-control"
+              placeholder="Type a message...">
+
+          <button
+              class="btn btn-primary"
+              onclick="sendMessage()">
+              Send
+          </button>
+
+        </div>
+
+      </div>
+
+    </div>
+
+  </div>
+
+</div>
+
+</body>
