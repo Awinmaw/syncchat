@@ -1,7 +1,8 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-DATABASE_URL = "sqlite:///./syncchat.db"
+#DATABASE_URL = "sqlite:///./syncchat.db"
+DATABASE_URL = "sqlite:////data/syncchat.db"
 
 engine = create_engine(
     DATABASE_URL,
