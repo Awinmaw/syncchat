@@ -7,7 +7,6 @@ from routes import users
 from starlette.middleware.sessions import SessionMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
