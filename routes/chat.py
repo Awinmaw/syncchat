@@ -384,12 +384,14 @@ async def websocket_endpoint(websocket: WebSocket):
 
             username = connections[websocket]["username"]
 
-            print("REMOVING:", "username")
+            print("REMOVING:", username)
+
             print("BEFORE REMOVE:", [
                 info["username"]
                 for info in connections.values()
             ])
 
+            # Remove this websocket
             del connections[websocket]
 
             print("AFTER REMOVE:", [
@@ -397,29 +399,51 @@ async def websocket_endpoint(websocket: WebSocket):
                 for info in connections.values()
             ])
 
-            # Save last seen time
-            with SessionLocal() as db:
 
-                user = db.query(User).filter(
-                    User.username == username
-                ).first()
-
-                if user:
-
-                    user.last_seen = datetime.utcnow()
-
-                    db.commit()
+            # Check whether this user still has another
+            # active websocket connection
+            still_connected = any(
+                info["username"] == username
+                for info in connections.values()
+            )
 
 
-            await broadcast_presence({
-                "type": "presence",
-                "username": username,
-                "online": False,
-                "last_seen": datetime.utcnow().isoformat() + "Z"
-            })
+            if not still_connected:
 
+                print(
+                    f"{username} has no active connections -> OFFLINE"
+                )
+
+                # Save last seen time
+                with SessionLocal() as db:
+
+                    user = db.query(User).filter(
+                        User.username == username
+                    ).first()
+
+                    if user:
+
+                        user.last_seen = datetime.utcnow()
+
+                        db.commit()
+
+
+                # Tell other users that this user is offline
+                await broadcast_presence({
+                    "type": "presence",
+                    "username": username,
+                    "online": False,
+                    "last_seen": datetime.utcnow().isoformat() + "Z"
+                })
+
+            else:
+
+                print(
+                    f"{username} still has an active connection -> STAY ONLINE"
+                )
 
         db.close()
+        
 
 # --- Helper functions ---
 async def broadcast_presence(payload):
