@@ -5,14 +5,13 @@ conn = sqlite3.connect("syncchat.db")
 cursor = conn.cursor()
 
 cursor.execute("""
-ALTER TABLE recent_chats
-ADD COLUMN cleared_message_id INTEGER DEFAULT 0;
+ALTER TABLE messages ADD COLUMN duration FLOAT;
 """)
 
 conn.commit()
 conn.close()
 
-print("cleared_message_id column added successfully")
+print("media_url column added successfully")
 
 # ALTER TABLE recent_chats
 # ADD COLUMN cleared_message_id INTEGER DEFAULT 0;

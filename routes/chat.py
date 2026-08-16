@@ -1,3 +1,7 @@
+import os
+import uuid
+import shutil
+from fastapi import UploadFile, File
 import json
 import logging
 import websockets
@@ -292,7 +296,11 @@ async def websocket_endpoint(websocket: WebSocket):
 
                 continue
 
-            if "message" not in msg:
+            # Ignore unsupported message types
+            if (
+                msg.get("type") not in ["text", "image", "audio"]
+                and "message" not in msg
+            ):
                 continue
 
             with SessionLocal() as db:
@@ -301,22 +309,75 @@ async def websocket_endpoint(websocket: WebSocket):
                     User.username == username
                 ).first()
 
-
                 if not user:
                     continue
 
                 room_id = connections[websocket]["room_id"]
-                new_message = Message(
-                    room_id=room_id,
-                    sender_id=user.id,
-                    message=msg["message"],
-                    sent_at=datetime.utcnow()
-                )
+
+                # --------------------------------
+                # TEXT MESSAGE
+                # --------------------------------
+                if msg.get("type") == "text" or ("message" in msg and not msg.get("type")):
+
+                    new_message = Message(
+                        room_id=room_id,
+                        sender_id=user.id,
+                        message=msg.get("message"),
+                        message_type="text",
+                        media_url=None,
+                        sent_at=datetime.utcnow()
+                    )
+
+                # --------------------------------
+                # IMAGE MESSAGE
+                # --------------------------------
+                elif msg.get("type") == "image":
+
+                    new_message = Message(
+                        room_id=room_id,
+                        sender_id=user.id,
+                        message=msg.get("message") or None,
+                        message_type="image",
+                        media_url=msg.get("media_url"),
+                        sent_at=datetime.utcnow()
+                    )
+
+                # --------------------------------
+                # AUDIO MESSAGE
+                # --------------------------------
+                elif msg.get("type") == "audio":
+
+                    audio_duration = msg.get("duration")
+
+                    # Make sure duration is stored as a valid number
+                    try:
+                        audio_duration = float(audio_duration)
+
+                        if audio_duration <= 0:
+                            audio_duration = None
+
+                    except (TypeError, ValueError):
+                        audio_duration = None
+
+                    print(
+                        "AUDIO MESSAGE:",
+                        "media_url =", msg.get("media_url"),
+                        "duration =", audio_duration
+                    )
+
+                    new_message = Message(
+                        room_id=room_id,
+                        sender_id=user.id,
+                        message=None,
+                        message_type="audio",
+                        media_url=msg.get("media_url"),
+                        duration=audio_duration,
+                        sent_at=datetime.utcnow()
+                    )
 
                 db.add(new_message)
                 db.commit()
                 db.refresh(new_message)
-
 
                 # Create unread status for receiver
                 if receiver:
@@ -334,40 +395,78 @@ async def websocket_endpoint(websocket: WebSocket):
                             new_message.id
                         )
 
-
                 payload = {
                     "type": "message",
                     "id": new_message.id,
                     "room_type": room_type,
                     "sender": username,
                     "receiver": receiver,
-                    "message": msg["message"],
+
+                    # Text/Audio/Image URL
+                    "message": new_message.message,
+                    "message_type": new_message.message_type,
+                    "media_url": new_message.media_url,
+                    "duration": new_message.duration,
+
                     "avatar_color": user.avatar_color,
+
                     "sent_at": (
                         new_message.sent_at.isoformat() + "Z"
                     ),
+
                     "is_read": new_message.is_read,
                     "public_seen": new_message.public_seen,
                 }
 
-
-                #  Send message to opened chat room only
+                # Send message to opened chat room only
                 if room_type == "public":
-                    await broadcast_to_room(room_id, payload)
+
+                    await broadcast_to_room(
+                        room_id,
+                        payload
+                    )
+
                 else:
+
                     await notify_private_users(
                         username,
                         receiver,
                         payload
                     )
 
-
-                #  Update recent chat sidebar only for two concern users (not everyone)
+                # Recent chat sidebar
                 await broadcast_chat_update(
                     sender=username,
                     receiver=receiver,
-                    message=msg["message"],
-                    sent_at=new_message.sent_at.isoformat() + "Z",
+
+                    message=(
+                        (
+                            "🎤 Voice message"
+                            + (
+                                ": " + msg.get("message", "")
+                                if msg.get("message", "").strip()
+                                else ""
+                            )
+                        )
+                        if msg.get("type") == "audio"
+
+                        else (
+                            "🖼️ Image"
+                            + (
+                                ": " + msg.get("message", "")
+                                if msg.get("message", "").strip()
+                                else ""
+                            )
+                        )
+                        if msg.get("type") == "image"
+
+                        else msg.get("message", "")
+                    ),
+
+                    sent_at=(
+                        new_message.sent_at.isoformat() + "Z"
+                    ),
+
                     avatar_color=user.avatar_color
                 )
 
@@ -616,6 +715,7 @@ async def broadcast_chat_update(sender, receiver, message, sent_at, avatar_color
             connections.pop(conn, None)
     db.close()
 
+
 # chat history API
 @router.get("/messages")
 def get_messages(room_id: int = Query(None),
@@ -672,12 +772,18 @@ def get_messages(room_id: int = Query(None),
                 "id": msg.id,
                 "sender": msg.sender.username if msg.sender else "Deleted User",
                 "deleted_user": msg.sender is None,
+
                 "avatar_color": (
                     msg.sender.avatar_color
                     if msg.sender
                     else "#999999"
                 ),
+
                 "message": msg.message,
+                "message_type": msg.message_type,
+                "media_url": msg.media_url,
+                "duration": msg.duration,
+                
                 "sent_at": msg.sent_at.isoformat() + "Z" if msg.sent_at else None,
                 "is_read": msg.is_read,
                 "public_seen": msg.public_seen
@@ -794,7 +900,33 @@ def get_chats(username: str):
                 "user_id": other_user.id,
                 "username": other_user.username,
                 "avatar_color": other_user.avatar_color,
-                "last_message": last_message.message if last_message else "",
+                #"last_message": last_message.message if last_message else "",
+                "last_message": (
+                    (
+                        "🎤 Voice message"
+                        + (
+                            ": " + last_message.message
+                            if last_message.message
+                            else ""
+                        )
+                    )
+                    if last_message and last_message.message_type == "audio"
+
+                    else (
+                        "🖼️ Image"
+                        + (
+                            ": " + last_message.message
+                            if last_message.message
+                            else ""
+                        )
+                    )
+                    if last_message and last_message.message_type == "image"
+
+                    else last_message.message
+                    if last_message
+                    else ""
+                ),
+                
                 "last_sender": (
                     "You"
                     if last_message and last_message.sender.username == username
@@ -1084,7 +1216,7 @@ async def add_recent_chat(
 
 # private chat history clear
 @router.post("/clear_chat")
-def clear_chat(
+async def clear_chat(
     username: str,
     contact_username: str
 ):
@@ -1149,3 +1281,58 @@ def clear_chat(
         return {
             "success": True
         }
+
+
+# media upload
+@router.post("/upload_media")
+async def upload_media(file: UploadFile = File(...)):
+
+    os.makedirs("media", exist_ok=True)
+
+    # Get extension
+    original_name = file.filename or ""
+    extension = os.path.splitext(original_name)[1].lower()
+
+    # Allowed types
+    allowed_extensions = {
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".gif",
+        ".webp",
+        ".mp3",
+        ".wav",
+        ".webm",
+        ".ogg",
+        ".m4a",
+        ".mp4"
+    }
+
+    if extension not in allowed_extensions:
+        return {
+            "success": False,
+            "message": "Unsupported file type"
+        }
+
+    # Generate unique filename
+    filename = f"{uuid.uuid4().hex}{extension}"
+
+    filepath = os.path.join(
+        "media",
+        filename
+    )
+
+    # Save file
+    with open(filepath, "wb") as buffer:
+        while True:
+            chunk = await file.read(1024 * 1024)
+
+            if not chunk:
+                break
+
+            buffer.write(chunk)
+
+    return {
+        "success": True,
+        "media_url": f"/media/{filename}"
+    }

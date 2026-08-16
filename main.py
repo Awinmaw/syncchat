@@ -11,9 +11,13 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 import os
-print(os.path.abspath("syncchat.db")) # show the absolute path of the database file
+os.makedirs("media", exist_ok=True)
+
+# print(os.path.abspath("syncchat.db")) # show the absolute path of the database file
 
 app = FastAPI()
+
+app.mount("/media", StaticFiles(directory="media"), name="media")
 
 # Create tables if they don’t exist
 Base.metadata.create_all(bind=engine)
@@ -51,7 +55,7 @@ def home():
     return {"message": "Server is running"}
 
 # CREATE DATABASE + TABLES
-Base.metadata.create_all(bind=engine)
+#Base.metadata.create_all(bind=engine)
 
 
 from database import SessionLocal

@@ -1,4 +1,4 @@
-from sqlalchemy import Table, Column, Integer, String, DateTime, ForeignKey
+from sqlalchemy import Table, Column, Integer, String, DateTime, ForeignKey, Text, Float
 from database import Base
 import datetime
 from sqlalchemy.orm import relationship
@@ -56,7 +56,29 @@ class Message(Base):
 
     sender_id = Column(Integer, ForeignKey("users.id"))
 
-    message = Column(String(1000))
+    # Text message
+    message = Column(String(1000), nullable=True)
+    
+    # text / image / audio
+    message_type = Column(
+        String(20),
+        default="text",
+        nullable=False
+    )
+
+    # File path for image/audio
+    # Example: /media/abc123.jpg (image)
+    #          /media/xyz456.webm (audio)
+    media_url = Column(
+        String(500),
+        nullable=True
+    )
+
+    # Audio duration in seconds
+    duration = Column(
+        Float,
+        nullable=True
+    )
 
     sent_at = Column(
         DateTime,

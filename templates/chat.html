@@ -124,14 +124,84 @@
           </button>
 
           <!-- Input -->
-          <div style="background-color: #e8eef2;">
+     <!-- <div style="background-color: #e8eef2;">
             <div class="chat-input-container">
               <textarea id="messageText" placeholder="Type a message..."></textarea>
               <button id="sendBtn" title="Send">
                   <i class="fas fa-arrow-up"></i>
               </button>
             </div>
-          </div>
+          </div> -->
+
+            <!-- Input -->
+            <div class="chat-input-wrapper">
+
+                <!-- Left buttons -->
+                <div class="input-left-actions">
+
+                    <button id="cameraBtn" class="input-action-btn" type="button" title="Photo">
+                        <i class="fa-solid fa-camera fa-lg"></i>
+                    </button>
+
+                    <div class="voice-actions">
+                        <button id="micBtn" class="input-action-btn" type="button" title="Voice message">
+                            <i class="fa-solid fa-microphone fa-lg"></i>
+                        </button>
+
+                        <button
+                            id="cancelMicBtn"
+                            class="input-action-btn cancel-recording-btn mb-2"
+                            type="button"
+                            title="Cancel recording"
+                            style="display:none;"
+                        >
+                            <i class="fa-solid fa-xmark fa-lg mt-2"></i>
+                        </button>
+                    </div>
+
+                </div>
+
+                <!-- Main input area -->
+                <div class="chat-input-main">
+
+                    <!-- Preview appears above textarea -->
+                    <div id="imagePreview" class="d-none">
+                        <img id="previewImage" src="" alt="Selected image">
+
+                        <button type="button" id="removeImage">
+                            ×
+                        </button>
+                    </div>
+
+                    <div class="chat-input-container">
+
+                        <div id="recordingText" style="display:none;">
+                            Recording...
+                        </div>
+
+                        <textarea
+                            id="messageText"
+                            placeholder="Write a message..."
+                            rows="1"
+                        ></textarea>
+
+                        <button id="sendBtn" class="send-btn" type="button" title="Send">
+                            <i class="fas fa-arrow-up"></i>
+                        </button>
+
+                    </div>
+
+                </div>
+
+                <!-- Hidden image input -->
+                <input
+                    type="file"
+                    id="imageInput"
+                    accept="image/*"
+                    hidden
+                >
+
+            </div>
 
         </div>
       </div>
@@ -158,6 +228,410 @@
   let manualClose = false;
   let socketId = 0;
 
+
+function scrollMessagesToBottom(behavior = "auto") {
+
+    const messagesDiv = document.getElementById("messages");
+
+    if (!messagesDiv) return;
+
+    // Wait for DOM/layout update
+    requestAnimationFrame(() => {
+
+        requestAnimationFrame(() => {
+
+            messagesDiv.scrollTo({
+                top: messagesDiv.scrollHeight,
+                behavior: behavior
+            });
+
+        });
+
+    });
+}
+
+// helper to update audio duration display
+function formatAudioTime(seconds) {
+
+    if (!Number.isFinite(seconds) || seconds < 0) {
+        return "0:00";
+    }
+
+    const minutes = Math.floor(seconds / 60);
+
+    const remainingSeconds = Math.floor(seconds % 60)
+        .toString()
+        .padStart(2, "0");
+
+    return `${minutes}:${remainingSeconds}`;
+}
+
+
+function updateAudioDuration(audio, durationElement) {
+
+    if (!Number.isFinite(audio.duration)) {
+        durationElement.textContent = "0:00";
+        return;
+    }
+
+    durationElement.textContent =
+        formatAudioTime(audio.duration);
+}
+
+// helper to create an audio message element
+let currentlyPlayingAudio = null;
+let currentlyPlayingButton = null;
+
+function createAudioMessage(msg) {
+
+    console.log("========== AUDIO MESSAGE ==========");
+    console.log("ID:", msg.id);
+    console.log("URL:", msg.media_url);
+    console.log("TYPE:", msg.message_type);
+    console.log("DURATION FROM SERVER:", msg.duration);
+    console.log("FULL MESSAGE:", msg);
+    console.log("====================================");
+
+    const audioWrapper = document.createElement("div");
+
+    audioWrapper.className = "chat-audio-wrapper";
+
+    const playBtn = document.createElement("button");
+
+    playBtn.className = "chat-audio-play";
+    playBtn.innerHTML = '<i class="fa-solid fa-play fa-sm"></i>';
+
+
+    const duration =  document.createElement("span");
+
+    duration.className = "chat-audio-duration";
+
+    const audio = document.createElement("audio");
+
+    audio.className = "chat-message-audio-hidden";
+    audio.preload = "auto";
+
+
+    // INITIAL DURATION
+    let originalDuration = 0;
+
+    duration.textContent =  "…";
+
+    // METADATA DURATION
+    function updateDurationFromAudio() {
+
+        const d = audio.duration;
+
+        console.log("AUDIO DURATION CHECK:", d);
+
+        if (
+            Number.isFinite(d) &&
+            d > 0
+        ) {
+
+            originalDuration = d;
+
+            duration.textContent =
+                formatAudioTime(d);
+
+            console.log(
+                "AUDIO REAL DURATION:",
+                d
+            );
+
+            return true;
+        }
+
+        // WebM/Opus can initially report Infinity.
+        if (d === Infinity) {
+
+            console.log(
+                "AUDIO DURATION IS INFINITY - SEEKING TO END"
+            );
+
+            try {
+                audio.currentTime = 1e10;
+            } catch (error) {
+                console.log(
+                    "Could not seek audio:",
+                    error
+                );
+            }
+        }
+
+        return false;
+    }
+
+    audio.addEventListener(
+        "loadedmetadata",
+        () => {
+
+            console.log(
+                "AUDIO METADATA LOADED:",
+                audio.duration
+            );
+
+            updateDurationFromAudio();
+
+        }
+    );
+
+
+    audio.addEventListener(
+        "durationchange",
+        () => {
+
+            updateDurationFromAudio();
+
+        }
+    );
+
+    audio.addEventListener(
+        "canplay",
+        () => {
+
+            console.log(
+                "AUDIO CAN PLAY:",
+                audio.duration
+            );
+
+            updateDurationFromAudio();
+
+        }
+    );
+
+    // REMAINING TIME
+    audio.addEventListener(
+        "timeupdate",
+        () => {
+
+            if (
+                !Number.isFinite(audio.duration) ||
+                audio.duration <= 0
+            ) {
+                return;
+            }
+
+
+            const remaining =
+                Math.max(
+                    0,
+                    audio.duration -
+                    audio.currentTime
+                );
+
+
+            duration.textContent =
+                formatAudioTime(remaining);
+
+        }
+    );
+
+
+    // PLAY / PAUSE
+    playBtn.addEventListener(
+        "click",
+        async () => {
+
+            try {
+
+                if (audio.paused) {
+
+                    // Stop previously playing voice message
+                    if (
+                        currentlyPlayingAudio &&
+                        currentlyPlayingAudio !== audio
+                    ) {
+
+                        currentlyPlayingAudio.pause();
+
+                        currentlyPlayingAudio.currentTime = 0;
+
+                        if (currentlyPlayingButton) {
+                            currentlyPlayingButton.innerHTML =
+                                '<i class="fa-solid fa-play"></i>';
+                        }
+                    }
+
+
+                    // Play this audio
+                    await audio.play();
+
+                    playBtn.innerHTML =
+                        '<i class="fa-solid fa-pause"></i>';
+
+
+                    // Remember current audio
+                    currentlyPlayingAudio = audio;
+                    currentlyPlayingButton = playBtn;
+
+                } else {
+
+                    // Pause current audio
+                    audio.pause();
+
+                    playBtn.innerHTML =
+                        '<i class="fa-solid fa-play"></i>';
+
+                }
+
+            } catch (error) {
+
+                console.error(
+                    "AUDIO PLAY FAILED:",
+                    error
+                );
+
+            }
+
+        }
+    );
+
+
+    // ENDED
+    audio.addEventListener(
+        "ended",
+        () => {
+
+            playBtn.innerHTML = '<i class="fa-solid fa-play fa-sm"></i>';
+
+            audio.currentTime = 0;
+
+            if (currentlyPlayingAudio === audio) {
+                currentlyPlayingAudio = null;
+                currentlyPlayingButton = null;
+            }
+
+            if (originalDuration > 0) {
+
+                duration.textContent =
+                    formatAudioTime(
+                        originalDuration
+                    );
+
+            }
+
+        }
+    );
+
+    // ERROR
+    audio.addEventListener(
+        "error",
+        () => {
+
+            console.error(
+                "========== AUDIO ERROR =========="
+            );
+
+            console.error(
+                "URL:",
+                msg.media_url
+            );
+
+            console.error(
+                "Audio error:",
+                audio.error
+            );
+
+            console.error(
+                "================================"
+            );
+
+        }
+    );
+
+    // SOURCE
+    audio.src = msg.media_url;
+    audio.load();
+
+    // FORCE WEBM DURATION DETECTION
+    const metadataAudio = document.createElement("audio");
+
+    metadataAudio.preload = "metadata";
+    metadataAudio.src = msg.media_url;
+
+    metadataAudio.addEventListener(
+        "loadedmetadata",
+        () => {
+
+            console.log(
+                "METADATA AUDIO DURATION:",
+                metadataAudio.duration
+            );
+
+            if (
+                Number.isFinite(metadataAudio.duration) &&
+                metadataAudio.duration > 0
+            ) {
+
+                originalDuration =
+                    metadataAudio.duration;
+
+                duration.textContent =
+                    formatAudioTime(
+                        originalDuration
+                    );
+
+                return;
+            }
+
+            if (metadataAudio.duration === Infinity) {
+
+                console.log("METADATA AUDIO = INFINITY, SEEKING...");
+
+                try {
+
+                    metadataAudio.currentTime = 1e10;
+
+                } catch (error) {
+
+                    console.error("Metadata seek failed:",error);
+
+                }
+
+            }
+
+        }
+    );
+
+
+    metadataAudio.addEventListener(
+        "durationchange",
+        () => {
+
+            console.log(
+                "METADATA DURATION CHANGE:",
+                metadataAudio.duration
+            );
+
+            if (
+                Number.isFinite(metadataAudio.duration) &&
+                metadataAudio.duration > 0
+            ) {
+
+                originalDuration =
+                    metadataAudio.duration;
+
+                duration.textContent =
+                    formatAudioTime(
+                        originalDuration
+                    );
+
+            }
+
+        }
+    );
+
+    metadataAudio.load();
+
+    // ADD TO DOM
+    audioWrapper.appendChild(playBtn);
+    audioWrapper.appendChild(duration);
+    audioWrapper.appendChild(audio);
+
+    return audioWrapper;
+}
+
   // render messages array
   function renderMessages(messages) {
   const messagesDiv = document.getElementById("messages");
@@ -166,7 +640,7 @@
   const wasNearBottom =
       messagesDiv.scrollHeight -
       messagesDiv.scrollTop -
-      messagesDiv.clientHeight < 80;
+      messagesDiv.clientHeight < 50;
 
   messagesDiv.innerHTML = "";
 
@@ -206,12 +680,61 @@
     
     bubble.appendChild(sender);
 
-    // message text
-    const msgText = document.createElement("div");
-    msgText.style.whiteSpace = "pre-wrap"; // handle (shift+enter) in sent message
-    msgText.textContent = msg.message;
-    bubble.appendChild(msgText);
+    // Message content
+    if (msg.message) {
 
+        const msgText = document.createElement("div");
+
+        msgText.style.whiteSpace = "pre-wrap";
+
+        msgText.textContent = msg.message;
+
+        bubble.appendChild(msgText);
+    }
+
+
+    // Image content
+    if ((msg.message_type === "image" || msg.type === "image") && msg.media_url) {
+
+        const image = document.createElement("img");
+
+        image.src = msg.media_url;
+        image.className = "chat-message-image";
+        image.alt = "Image";
+
+        image.addEventListener("click", () => {
+
+            window.open(msg.media_url, "_blank");
+
+        });
+
+        // Scroll again after the image has finished loading
+        image.addEventListener("load", () => {
+            if (wasNearBottom) {
+                scrollMessagesToBottom("auto");
+            }
+        });
+
+        bubble.appendChild(image);
+    }
+
+    // Audio content
+    if ((msg.message_type === "audio" || msg.type === "audio") && msg.media_url) 
+    {
+
+        console.log("RENDER AUDIO:", {
+            id: msg.id,
+            url: msg.media_url,
+            message_type: msg.message_type,
+            type: msg.type
+        });
+
+        const audioWrapper = createAudioMessage(msg);
+
+        bubble.appendChild(audioWrapper);
+    }
+
+    
     // horizontal line
     const footer = document.createElement("div");
     footer.className = "msg-footer";
@@ -256,9 +779,10 @@
   });
 
   //messagesDiv.scrollTop = messagesDiv.scrollHeight;
-    if (wasNearBottom || messagesDiv.scrollHeight === 0) {
+  scrollMessagesToBottom("auto");
+  /*if (wasNearBottom || messagesDiv.scrollHeight === 0) {
       messagesDiv.scrollTop = messagesDiv.scrollHeight;
-  }
+  }*/
 }
 
 // helper to append a single message row (used for incoming WebSocket messages)
@@ -269,7 +793,7 @@ function appendMessageRow(msg) {
   const wasNearBottom =
       messagesDiv.scrollHeight -
       messagesDiv.scrollTop -
-      messagesDiv.clientHeight < 80;
+      messagesDiv.clientHeight < 50;
   
   const row = document.createElement("div");
   row.className = msg.sender === username ? "message-row me" : "message-row other";
@@ -305,11 +829,71 @@ function appendMessageRow(msg) {
 
     bubble.appendChild(sender);
 
-    // message text
-    const msgText = document.createElement("div");
-    msgText.style.whiteSpace = "pre-wrap"; // handle (shift+enter) for sent meaasge
-    msgText.textContent = msg.message;
-    bubble.appendChild(msgText);
+    // Message content
+    if (msg.message) {
+
+        const msgText = document.createElement("div");
+        msgText.style.whiteSpace = "pre-wrap"; // handle line breaks and whitespace(shift+enter)
+        msgText.textContent = msg.message;
+        bubble.appendChild(msgText);
+    }
+
+
+    // Image content
+    if ((msg.message_type === "image" || msg.type === "image") && msg.media_url) {
+
+        // Check BEFORE adding the image
+        const wasNearBottom =
+            messagesDiv.scrollHeight -
+            messagesDiv.scrollTop -
+            messagesDiv.clientHeight < 50;
+
+        const image = document.createElement("img");
+
+        image.src = msg.media_url;
+        image.className = "chat-message-image";
+        image.alt = "Image";
+
+
+        image.addEventListener("click", () => {
+
+            window.open(msg.media_url, "_blank");
+
+        });
+        
+        image.addEventListener("load", () => {
+
+            if (wasNearBottom) {
+                scrollMessagesToBottom("smooth");
+            }
+
+        });
+
+        bubble.appendChild(image);
+    }
+
+    // Audio content
+    if (
+        (msg.message_type === "audio" || msg.type === "audio") &&
+        msg.media_url
+    ) {
+        console.log("NEW AUDIO URL:", msg.media_url);
+
+        console.log("RENDER AUDIO:", {
+            id: msg.id,
+            url: msg.media_url,
+            message_type: msg.message_type,
+            type: msg.type
+        });
+
+            const audioWrapper =
+            createAudioMessage(msg);
+
+        bubble.appendChild(
+            audioWrapper
+        );
+    }
+        
 
     // horizontal line
     const footer = document.createElement("div");
@@ -357,12 +941,16 @@ function appendMessageRow(msg) {
     
     // only scroll to bottom if the user was already near the bottom before the new message arrived
     if (wasNearBottom) {
+        scrollMessagesToBottom("smooth");
+    };
+    /*if (wasNearBottom) {
         messagesDiv.scrollTo({
             top: messagesDiv.scrollHeight,
             behavior: "smooth"
         });
-    }
+    }*/
 }
+
 
 function formatTime(sent_at) {
     //if (!sent_at) return "Just now";
@@ -505,10 +1093,26 @@ async function handleIncomingMessage(event) {
             ? data.receiver
             : data.sender;
 
+        let previewMessage = data.message || "";
+
+        // Keep image indicator in recent chat preview
+        if (data.message_type === "image" || data.type === "image") {
+
+            previewMessage = "🖼️ Image";
+
+            if (data.message && data.message.trim()) {
+                previewMessage += ": " + data.message;
+            }
+        } else if (data.message_type === "audio" || data.type === "audio") {
+
+            previewMessage = "🎤 Voice message";
+        }
+        
         updateSidebarChat({
             sender: chatUser,
             last_sender: data.sender === username ? "You" : data.sender,
-            message: data.message,
+            message: previewMessage,
+            //message: data.message,
             sent_at: data.sent_at
         });
 
@@ -690,29 +1294,80 @@ function isUserOnline(username) {
 
   // Fetch PUBLIC messages
   async function loadPublicMessages() {
-    const response = await fetch("/messages");
-    const data = await response.json();
-    renderMessages(data);
 
-    // Mark public messages as seen after opening Public Chat
-    data.forEach(msg => {
+    try {
 
-        if(msg.sender !== username){
+        const response =
+            await fetch("/messages");
 
-            ws.send(JSON.stringify({
-                type: "public_seen",
-                message_id: msg.id
-            }));
-
+        if (!response.ok) {
+            throw new Error(
+                "Failed to load public messages"
+            );
         }
 
-    });
+        const data =
+            await response.json();
 
-    // After rebuilding messages, re‑apply presence state
-    Object.keys(onlineUsers).forEach(u => {
-      updateUserStatus(u, onlineUsers[u], lastSeenUsers[u]);
-    });
-  }
+        // Don't render public messages if
+        // user has already switched to private chat
+        if (currentReceiver !== null) {
+            return;
+        }
+
+        renderMessages(data);
+
+
+        // Mark received messages as seen
+        if (
+            ws &&
+            ws.readyState === WebSocket.OPEN
+        ) {
+
+            data.forEach(msg => {
+
+                if (
+                    msg.sender !== username
+                ) {
+
+                    ws.send(
+                        JSON.stringify({
+
+                            type:
+                                "public_seen",
+
+                            message_id:
+                                msg.id
+
+                        })
+                    );
+                }
+
+            });
+        }
+
+
+        // Restore presence
+        Object.keys(
+            onlineUsers
+        ).forEach(u => {
+
+            updateUserStatus(
+                u,
+                onlineUsers[u],
+                lastSeenUsers[u]
+            );
+
+        });
+
+    } catch (error) {
+
+        console.error(
+            "loadPublicMessages error:",
+            error
+        );
+    }
+}
 
   // Fetch PRIVATE messages
   async function loadMessagesForRoom(receiver) {
@@ -893,7 +1548,7 @@ function connectWebSocket(url) {
             sendBtn.disabled = false;
         }
 
-        // only private chat
+        // Private chat
         if(currentReceiver && url.includes("receiver=")){
 
             if(ws.readyState === WebSocket.OPEN){
@@ -910,7 +1565,7 @@ function connectWebSocket(url) {
         
 
         // Wait until websocket is connected before sending public_seen
-        // If currently in Public Chat
+        // Public Chat
         if (
             currentReceiver === null &&
             currentSocketId === socketId
@@ -979,7 +1634,7 @@ function connectWebSocket(url) {
 
 
 // Send message function
-function sendMessage() {
+/*function sendMessage() {
   let input = document.getElementById("messageText");
   if (input.value.trim() !== "") {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -999,9 +1654,203 @@ function sendMessage() {
     input.style.height = "auto";
     input.style.height = "24px";
     input.style.overflowY = "hidden";
-    input.style.overflowY = "hidden";
   }
+}*/
+
+async function sendMessage() {
+
+    const input = document.getElementById("messageText");
+
+    const text = input.value.trim();
+
+
+    // Nothing to send
+    if (!text && !selectedImageFile) {
+        return;
+    }
+
+
+    // WebSocket must be ready
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+
+        alert("Connection not ready yet. Please wait a moment.");
+
+        return;
+    }
+
+    // SEND IMAGE
+    if (selectedImageFile) {
+
+        const file = selectedImageFile;
+
+        const formData = new FormData();
+
+        formData.append("file", file);
+
+
+        try {
+
+            const response = await fetch("/upload_media", {
+
+                method: "POST",
+
+                body: formData
+
+            });
+
+
+            if (!response.ok) {
+
+                throw new Error(
+                    "Upload failed: " + response.status
+                );
+
+            }
+
+
+            const data = await response.json();
+
+
+            if (!data.success) {
+
+                alert(
+                    data.message ||
+                    "Image upload failed."
+                );
+
+                return;
+            }
+
+
+            console.log(
+                "IMAGE UPLOADED:",
+                data.media_url
+            );
+
+
+            // Send image through WebSocket
+            ws.send(JSON.stringify({
+
+                type: "image",
+                message_type: "image",
+                media_url: data.media_url,
+                message: text
+
+            }));
+
+
+            // Clear selected image
+            clearSelectedImage();
+
+
+            /*const preview =
+                document.getElementById("imagePreview");
+
+            const previewImage =
+                document.getElementById("previewImage");
+
+
+            if (
+                previewImage.src &&
+                previewImage.src.startsWith("blob:")
+            ) {
+
+                URL.revokeObjectURL(
+                    previewImage.src
+                );
+
+            }
+
+
+            previewImage.src = "";
+
+            preview.classList.add("d-none");*/
+
+
+        } catch (error) {
+
+            console.error(
+                "Image upload error:",
+                error
+            );
+
+            alert(
+                "Failed to upload image."
+            );
+
+            return;
+        }
+
+    } else {
+
+        // SEND TEXT ONLY
+        ws.send(
+            JSON.stringify({
+
+                sender: username,
+
+                message: text
+
+            })
+        );
+    }
+
+    // SEND TEXT
+    /*if (text) {
+
+        ws.send(JSON.stringify({
+
+            sender: username,
+
+            message: text
+
+        }));
+
+    }*/
+
+
+    // Clear textarea
+    input.value = "";
+
+    input.style.height = "24px";
+
+    input.style.overflowY = "hidden";
+
 }
+
+function clearSelectedImage() {
+
+    selectedImageFile = null;
+
+    const preview =
+        document.getElementById(
+            "imagePreview"
+        );
+
+    const image =
+        document.getElementById(
+            "previewImage"
+        );
+
+
+    if (
+        image.src &&
+        image.src.startsWith("blob:")
+    ) {
+
+        URL.revokeObjectURL(
+            image.src
+        );
+    }
+
+
+    image.src = "";
+
+    preview.classList.add(
+        "d-none"
+    );
+}
+
 
 // PUBLIC Chat button
 const publicBtn = document.getElementById("publicChat");
@@ -1368,7 +2217,10 @@ async function loadChats() {
             
             btn.onclick = async function () {
 
-                currentReceiver = chat.username;
+
+                openPrivateChat(chat);
+
+                /*currentReceiver = chat.username;
                 lastReadMessageId = 0;
 
                 delete newChatUsers[chat.username];
@@ -1401,7 +2253,7 @@ async function loadChats() {
 
                 if(window.innerWidth < 768){
                     sidebar.classList.remove("active");
-                }
+                }*/
 
             };
 
@@ -1902,7 +2754,7 @@ window.onload = async function () {
       const nearBottom =
           messagesDiv.scrollHeight -
           messagesDiv.scrollTop -
-          messagesDiv.clientHeight < 80;
+          messagesDiv.clientHeight < 50;
 
       if (nearBottom) {
           scrollBtn.style.display = "none";
@@ -2230,6 +3082,577 @@ function updateReadStatus(lastReadId){
     });
 
 }
+
+// for private chat switching
+function openPrivateChat(user) {
+
+    if (!user || !user.username) {
+        return;
+    }
+
+
+    // Stop typing state
+    isTyping = false;
+
+    clearTimeout(
+        typingTimer
+    );
+
+
+    currentReceiver =
+        user.username;
+
+    lastReadMessageId = 0;
+
+
+    // Clear unread
+    unreadCounts[
+        user.username
+    ] = 0;
+
+    delete newChatUsers[
+        user.username
+    ];
+
+
+    updateUnreadBadge(
+        user.username
+    );
+
+
+    // Connect to private WebSocket
+    connectWebSocket(
+        getWebSocketUrl(
+            "/ws?username=" +
+            encodeURIComponent(username) +
+            "&receiver=" +
+            encodeURIComponent(
+                user.username
+            )
+        )
+    );
+
+
+    // Load messages
+    loadMessagesForRoom(
+        user.username
+    );
+
+
+    // Header
+    showPrivateHeader(
+        user
+    );
+
+
+    // Hide search
+    userSearch.value = "";
+
+    clearSearch.style.display =
+        "none";
+
+    document.getElementById(
+        "newChatUsers"
+    ).style.display = "none";
+
+
+    // Mobile
+    if (
+        window.innerWidth < 768
+    ) {
+
+        sidebar.classList.remove(
+            "active"
+        );
+    }
+}
+
+
+// IMAGE ATTACHMENT
+
+let selectedImageFile = null;
+
+
+// Handle selected image
+function handleImageSelected(file) {
+
+    if (!file) return;
+
+    selectedImageFile = file;
+
+    const preview = document.getElementById("imagePreview");
+    const image = document.getElementById("previewImage");
+
+    // Release old preview URL
+    if (image.src && image.src.startsWith("blob:")) {
+        URL.revokeObjectURL(image.src);
+    }
+
+    image.src = URL.createObjectURL(file);
+
+    preview.classList.remove("d-none");
+}
+
+
+// Open image picker
+document.getElementById("cameraBtn").addEventListener("click", () => {
+
+    document.getElementById("imageInput").click();
+
+});
+
+
+// Image selected
+document.getElementById("imageInput").addEventListener("change", function () {
+
+    if (this.files && this.files.length > 0) {
+
+        handleImageSelected(this.files[0]);
+
+    }
+
+    // Allow selecting the same image again
+    this.value = "";
+
+});
+
+// Remove selected image
+document.getElementById("removeImage").addEventListener("click", clearSelectedImage);
+
+
+
+// VOICE MESSAGE / MICROPHONE
+let mediaRecorder = null;
+let audioChunks = [];
+let isRecording = false;
+
+// Store when recording started
+let recordingStartTime = 0;
+
+// Find supported recording format
+function getSupportedAudioMimeType() {
+
+    const types = [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/ogg;codecs=opus",
+        "audio/ogg",
+        "audio/mp4"
+    ];
+
+    for (const type of types) {
+
+        if (MediaRecorder.isTypeSupported(type)) {
+            console.log("Using audio format:", type);
+            return type;
+        }
+    }
+
+    return "";
+}
+
+
+// Start / stop recording
+document.getElementById("micBtn").addEventListener("click", async function () {
+
+        // STOP RECORDING
+        if (isRecording) {
+
+            console.log("Stopping recording...");
+
+            mediaRecorder.stop();
+
+            return;
+        }
+
+
+        // CHECK BROWSER SUPPORT
+        if (
+            !navigator.mediaDevices ||
+            !navigator.mediaDevices.getUserMedia
+        ) {
+
+            alert(
+                "Microphone recording is not supported by this browser."
+            );
+
+            return;
+        }
+
+
+        // CHECK WEBSOCKET
+        if (
+            !ws ||
+            ws.readyState !== WebSocket.OPEN
+        ) {
+
+            alert(
+                "Connection not ready yet. Please wait a moment."
+            );
+
+            return;
+        }
+
+
+        try {
+
+            // Request microphone
+            const stream =
+                await navigator.mediaDevices.getUserMedia({
+                    audio: true
+                });
+
+
+            audioChunks = [];
+
+
+            // Find supported format
+            const mimeType =
+                getSupportedAudioMimeType();
+
+
+            if (!mimeType) {
+
+                stream
+                    .getTracks()
+                    .forEach(track => track.stop());
+
+                alert(
+                    "Your browser does not support audio recording."
+                );
+
+                return;
+            }
+
+
+            console.log(
+                "RECORDING MIME TYPE:",
+                mimeType
+            );
+
+
+            // CREATE RECORDER
+            mediaRecorder =
+                new MediaRecorder(
+                    stream,
+                    {
+                        mimeType: mimeType
+                    }
+                );
+
+
+            // RECEIVE AUDIO DATA
+            mediaRecorder.ondataavailable =
+                function (event) {
+
+                    console.log(
+                        "AUDIO CHUNK:",
+                        event.data.size
+                    );
+
+                    if (
+                        event.data &&
+                        event.data.size > 0
+                    ) {
+
+                        audioChunks.push(
+                            event.data
+                        );
+                    }
+                };
+
+
+            // RECORDING ERROR
+            mediaRecorder.onerror =
+                function (event) {
+
+                    console.error(
+                        "MEDIA RECORDER ERROR:",
+                        event.error
+                    );
+
+                    stream
+                        .getTracks()
+                        .forEach(track =>
+                            track.stop()
+                        );
+
+                    resetMicButton();
+                };
+
+
+            // RECORDING STOPPED
+            mediaRecorder.onstop = async function () {
+
+                    console.log("RECORDING STOPPED");
+
+                    // Calculate recording duration
+                    const recordingDuration =
+                        (Date.now() - recordingStartTime) / 1000;
+
+                    console.log(
+                        "RECORDING DURATION:",
+                        recordingDuration
+                    );
+
+                    // Stop microphone
+                    stream.getTracks().forEach(
+                        track =>  track.stop()
+                    );
+
+
+                    console.log("TOTAL AUDIO CHUNKS:", audioChunks.length);
+
+                    // CANCELLED
+                    if (cancelRecording) {
+
+                        console.log("RECORDING CANCELLED");
+
+                        audioChunks = [];
+                        mediaRecorder = null;
+                        cancelRecording = false;
+
+                        resetMicButton();
+
+                        return;
+                    }
+
+
+                    if (
+                        audioChunks.length === 0
+                    ) {
+
+                        console.error(
+                            "NO AUDIO CHUNKS"
+                        );
+
+                        resetMicButton();
+
+                        return;
+                    }
+
+
+                    // CREATE AUDIO BLOB
+                    const audioBlob =
+                        new Blob(
+                            audioChunks,
+                            {
+                                type: mimeType
+                            }
+                        );
+
+
+                    console.log("AUDIO BLOB:", audioBlob.size, audioBlob.type);
+
+                    if (
+                        audioBlob.size === 0
+                    ) {
+
+                        console.error(
+                            "EMPTY AUDIO BLOB"
+                        );
+
+                        resetMicButton();
+
+                        return;
+                    }
+
+                    // UPLOAD
+                    await sendVoiceMessage(
+                        audioBlob,
+                        mimeType,
+                        recordingDuration
+                    );
+
+                    audioChunks = [];
+
+                    mediaRecorder = null;
+                };
+
+
+            // START RECORDING
+            mediaRecorder.start(100);
+
+            // Save recording start time
+            recordingStartTime = Date.now();
+
+            isRecording = true;
+
+            // Change mic button
+            const micBtn = document.getElementById("micBtn");
+
+            micBtn.classList.add("recording");
+
+            micBtn.innerHTML = '<i class="fa-solid fa-stop fa-lg"></i>';
+            micBtn.title = "Stop recording";
+            cancelMicBtn.style.display = "inline-flex";
+
+            // SHOW RECORDING TEXT
+            const recordingText = document.getElementById("recordingText");
+
+            const messageText = document.getElementById("messageText");
+
+            recordingText.style.display = "block";
+            messageText.style.display = "none";
+
+            console.log("VOICE RECORDING STARTED");
+
+        } catch (error) {
+
+            console.error(
+                "MICROPHONE ERROR:",
+                error
+            );
+
+            alert(
+                "Microphone permission is required to record a voice message."
+            );
+
+            resetMicButton();
+        }
+    }
+);
+
+// Reset microphone button
+function resetMicButton() {
+
+    isRecording = false;
+    const micBtn = document.getElementById("micBtn");
+    const cancelBtn = document.getElementById("cancelMicBtn");
+    const recordingText = document.getElementById("recordingText");
+    const messageText = document.getElementById("messageText");
+
+    micBtn.classList.remove("recording");
+
+    micBtn.innerHTML = '<i class="fa-solid fa-microphone fa-lg"></i>';
+
+    micBtn.title = "Voice message";
+    cancelBtn.style.display = "none";
+
+    // SHOW MESSAGE BOX AGAIN
+    recordingText.style.display = "none";
+    messageText.style.display = "block";
+}
+
+
+async function sendVoiceMessage(audioBlob, mimeType, recordingDuration) {
+
+    resetMicButton();
+
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        alert("Connection not ready yet. Please wait a moment.");
+        return;
+    }
+
+    // Determine extension
+    let extension = ".webm";
+
+    if (mimeType.includes("ogg")) {
+        extension = ".ogg";
+    } else if (mimeType.includes("mp4")) {
+        extension = ".mp4";
+    }
+
+    const audioFile = new File(
+        [audioBlob],
+        "voice-message" + extension,
+        {
+            type: mimeType
+        }
+    );
+
+    console.log("VOICE FILE:", {
+        name: audioFile.name,
+        type: audioFile.type,
+        size: audioFile.size
+    });
+
+    const formData = new FormData();
+
+    formData.append("file", audioFile);
+
+    try {
+
+        // UPLOAD AUDIO
+        const response = await fetch("/upload_media", {
+            method: "POST",
+            body: formData
+        });
+
+        if (!response.ok) {
+            throw new Error(
+                "Upload failed: HTTP " + response.status
+            );
+        }
+
+        const data = await response.json();
+
+        console.log("AUDIO UPLOAD RESPONSE:", data);
+
+        if (!data.success || !data.media_url) {
+
+            alert(
+                data.message ||
+                "Voice message upload failed."
+            );
+
+            return;
+        }
+
+        console.log(
+            "AUDIO URL:",
+            data.media_url
+        );
+
+
+        // SEND THROUGH WEBSOCKET
+        const messageData = {
+            type: "audio",
+            message_type: "audio",
+            media_url: data.media_url,
+            message: "",
+            duration: recordingDuration
+        };
+
+        console.log(
+            "SENDING AUDIO THROUGH WS:",
+            messageData
+        );
+
+        ws.send(JSON.stringify(messageData));
+
+    } catch (error) {
+
+        console.error(
+            "Voice upload error:",
+            error
+        );
+
+        alert(
+            "Failed to upload voice message."
+        );
+    }
+}
+
+// cancel recording
+const cancelMicBtn = document.getElementById("cancelMicBtn");
+
+let cancelRecording = false;
+
+cancelMicBtn.addEventListener("click", function () {
+
+    if (!isRecording || !mediaRecorder) {
+        return;
+    }
+
+    console.log("CANCEL RECORDING");
+
+    // Tell onstop not to upload
+    cancelRecording = true;
+
+    // Stop recorder
+    mediaRecorder.stop();
+});
 </script>
 </body>
 </html>
