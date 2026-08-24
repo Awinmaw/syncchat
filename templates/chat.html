@@ -60,7 +60,7 @@
 
         <button id="publicChat" class="btn BtnPS">
             <i class="fa-solid fa-globe fa-lg me-1" style="color: rgb(255, 255, 255);"></i>
-               Join Group Chat
+               Group Chat
         </button>
 
         <hr>
@@ -150,12 +150,12 @@
 
                         <button
                             id="cancelMicBtn"
-                            class="input-action-btn cancel-recording-btn mb-2"
+                            class="input-action-btn cancel-recording-btn"
                             type="button"
                             title="Cancel recording"
                             style="display:none;"
                         >
-                            <i class="fa-solid fa-xmark fa-lg mt-2"></i>
+                            <i class="fa-solid fa-xmark fa-lg"></i>
                         </button>
                     </div>
 
@@ -164,7 +164,7 @@
                 <!-- Main input area -->
                 <div class="chat-input-main">
 
-                    <!-- Preview appears above textarea -->
+                    <!-- Image Preview -->
                     <div id="imagePreview" class="d-none">
                         <img id="previewImage" src="" alt="Selected image">
 
@@ -173,17 +173,38 @@
                         </button>
                     </div>
 
+                    <!-- Voice message preview -->
+                    <div id="audioPreview" class="audio-preview d-none">
+
+                        <button type="button" id="removeAudioPreview" class="audio-preview-remove">
+                            <i class="fa-solid fa-xmark"></i>
+                        </button>
+
+                        <button type="button" id="previewAudioPlay" class="audio-preview-play">
+                            <i class="fa-solid fa-play"></i>
+                        </button>
+
+                        <div class="audio-preview-info">
+                            <div class="audio-preview-title">
+                                Voice message
+                            </div>
+
+                            <div id="previewAudioDuration" class="audio-preview-duration">
+                                0:00
+                            </div>
+                        </div>
+
+                        <audio id="previewAudio" hidden></audio>
+
+                    </div>
+
                     <div class="chat-input-container">
 
                         <div id="recordingText" style="display:none;">
                             Recording...
                         </div>
 
-                        <textarea
-                            id="messageText"
-                            placeholder="Write a message..."
-                            rows="1"
-                        ></textarea>
+                        <textarea id="messageText" placeholder="Write a message..." rows="1"></textarea>
 
                         <button id="sendBtn" class="send-btn" type="button" title="Send">
                             <i class="fas fa-arrow-up"></i>
@@ -331,32 +352,16 @@ function createAudioMessage(msg) {
 
             originalDuration = d;
 
-            duration.textContent =
-                formatAudioTime(d);
-
-            console.log(
-                "AUDIO REAL DURATION:",
-                d
-            );
-
+            duration.textContent = formatAudioTime(d);
+            console.log("AUDIO REAL DURATION:", d);
             return true;
         }
 
-        // WebM/Opus can initially report Infinity.
+        // WebM/Opus can temporarily report Infinity.
         if (d === Infinity) {
 
-            console.log(
-                "AUDIO DURATION IS INFINITY - SEEKING TO END"
-            );
-
-            try {
-                audio.currentTime = 1e10;
-            } catch (error) {
-                console.log(
-                    "Could not seek audio:",
-                    error
-                );
-            }
+            console.log("AUDIO DURATION IS INFINITY - SEEKING TO END");
+            
         }
 
         return false;
@@ -429,63 +434,59 @@ function createAudioMessage(msg) {
 
 
     // PLAY / PAUSE
-    playBtn.addEventListener(
-        "click",
-        async () => {
+    playBtn.addEventListener("click", async function (event) {
 
-            try {
+        event.preventDefault();
+        event.stopPropagation();
 
-                if (audio.paused) {
+        // THIS AUDIO IS ALREADY PLAYING
+        if (!audio.paused) {
 
-                    // Stop previously playing voice message
-                    if (
-                        currentlyPlayingAudio &&
-                        currentlyPlayingAudio !== audio
-                    ) {
+            audio.pause();
+            playBtn.innerHTML = '<i class="fa-solid fa-play"></i>';
 
-                        currentlyPlayingAudio.pause();
-
-                        currentlyPlayingAudio.currentTime = 0;
-
-                        if (currentlyPlayingButton) {
-                            currentlyPlayingButton.innerHTML =
-                                '<i class="fa-solid fa-play"></i>';
-                        }
-                    }
-
-
-                    // Play this audio
-                    await audio.play();
-
-                    playBtn.innerHTML =
-                        '<i class="fa-solid fa-pause"></i>';
-
-
-                    // Remember current audio
-                    currentlyPlayingAudio = audio;
-                    currentlyPlayingButton = playBtn;
-
-                } else {
-
-                    // Pause current audio
-                    audio.pause();
-
-                    playBtn.innerHTML =
-                        '<i class="fa-solid fa-play"></i>';
-
-                }
-
-            } catch (error) {
-
-                console.error(
-                    "AUDIO PLAY FAILED:",
-                    error
-                );
-
-            }
-
+            return;
         }
-    );
+
+        // STOP PREVIOUSLY PLAYING AUDIO
+        if (
+            currentlyPlayingAudio &&
+            currentlyPlayingAudio !== audio
+        ) {
+
+            currentlyPlayingAudio.pause();
+
+            currentlyPlayingAudio.currentTime = 0;
+
+            if (currentlyPlayingButton) {
+                currentlyPlayingButton.innerHTML = '<i class="fa-solid fa-play"></i>';
+            }
+        }
+
+        // Remember this audio BEFORE playing
+        currentlyPlayingAudio = audio;
+        currentlyPlayingButton = playBtn;
+
+        try {
+
+            await audio.play();
+
+            playBtn.innerHTML = '<i class="fa-solid fa-pause"></i>';
+
+        } catch (error) {
+
+            console.error(
+                "AUDIO PLAY FAILED:",
+                error
+            );
+
+            currentlyPlayingAudio = null;
+            currentlyPlayingButton = null;
+
+            playBtn.innerHTML = '<i class="fa-solid fa-play"></i>';
+        }
+
+    });
 
 
     // ENDED
@@ -1660,20 +1661,39 @@ function connectWebSocket(url) {
 async function sendMessage() {
 
     const input = document.getElementById("messageText");
-
     const text = input.value.trim();
 
-
     // Nothing to send
-    if (!text && !selectedImageFile) {
+    if (!text && !selectedImageFile && !pendingVoiceMessage) {
         return;
     }
-
 
     // WebSocket must be ready
     if (!ws || ws.readyState !== WebSocket.OPEN) {
 
         alert("Connection not ready yet. Please wait a moment.");
+        return;
+    }
+
+    // SEND PENDING VOICE MESSAGE
+    if (pendingVoiceMessage) {
+
+        const voice = pendingVoiceMessage;
+
+        pendingVoiceMessage = null;
+
+        await sendVoiceMessage(
+            voice.audioBlob,
+            voice.mimeType,
+            voice.duration
+        );
+
+        // REMOVE AUDIO PREVIEW
+        clearAudioPreview();
+
+        input.value = "";
+        input.style.height = "24px";
+        input.style.overflowY = "hidden";
 
         return;
     }
@@ -1682,7 +1702,6 @@ async function sendMessage() {
     if (selectedImageFile) {
 
         const file = selectedImageFile;
-
         const formData = new FormData();
 
         formData.append("file", file);
@@ -1693,7 +1712,6 @@ async function sendMessage() {
             const response = await fetch("/upload_media", {
 
                 method: "POST",
-
                 body: formData
 
             });
@@ -1710,7 +1728,6 @@ async function sendMessage() {
 
             const data = await response.json();
 
-
             if (!data.success) {
 
                 alert(
@@ -1721,12 +1738,10 @@ async function sendMessage() {
                 return;
             }
 
-
             console.log(
                 "IMAGE UPLOADED:",
                 data.media_url
             );
-
 
             // Send image through WebSocket
             ws.send(JSON.stringify({
@@ -1737,7 +1752,6 @@ async function sendMessage() {
                 message: text
 
             }));
-
 
             // Clear selected image
             clearSelectedImage();
@@ -2805,10 +2819,7 @@ window.onload = async function () {
   function updatePublicStats() {
 
       const totalUsers = totalUsersCount;
-
-      const onlineCount = Object.values(onlineUsers)
-          .filter(v => v).length;
-
+      const onlineCount = Object.values(onlineUsers).filter(v => v).length;
       const stats = document.getElementById("publicStats");
 
       if (stats) {
@@ -2906,7 +2917,6 @@ window.onload = async function () {
                 const btn = document.createElement("button");
 
                 btn.className = "btn chat-user-btn w-100 mb-2";
-
                 btn.dataset.username = user.username;
 
                 btn.innerHTML = `
@@ -2987,11 +2997,9 @@ function markChatAsRead(){
     }
 
     unreadCounts[currentReceiver] = 0;
-
     updateUnreadBadge(currentReceiver);
 
     if(ws && ws.readyState === WebSocket.OPEN){
-
         ws.send(JSON.stringify({
             type:"mark_read",
             receiver: currentReceiver
@@ -3029,12 +3037,8 @@ function markChatAsRead(){
     textarea.addEventListener("input", function () {
 
         this.style.height = "0px";
-
         this.style.height = Math.min(this.scrollHeight, 160) + "px";
-
-        this.style.overflowY =
-            this.scrollHeight > 150 ? "auto" : "hidden";
-
+        this.style.overflowY = this.scrollHeight > 150 ? "auto" : "hidden";
 
         // Private chat only
         if (!currentReceiver) return;
@@ -3067,14 +3071,11 @@ function updateReadStatus(lastReadId){
     .querySelectorAll(".read-status")
     .forEach(status=>{
 
-        const messageId =
-            Number(status.dataset.messageId);
-
+        const messageId = Number(status.dataset.messageId);
 
         if(messageId <= lastReadId){
 
             status.innerHTML = "✓✓";
-
             status.classList.add("read");
 
         }
@@ -3099,11 +3100,8 @@ function openPrivateChat(user) {
     );
 
 
-    currentReceiver =
-        user.username;
-
+    currentReceiver = user.username;
     lastReadMessageId = 0;
-
 
     // Clear unread
     unreadCounts[
@@ -3148,8 +3146,7 @@ function openPrivateChat(user) {
     // Hide search
     userSearch.value = "";
 
-    clearSearch.style.display =
-        "none";
+    clearSearch.style.display = "none";
 
     document.getElementById(
         "newChatUsers"
@@ -3171,7 +3168,6 @@ function openPrivateChat(user) {
 // IMAGE ATTACHMENT
 
 let selectedImageFile = null;
-
 
 // Handle selected image
 function handleImageSelected(file) {
@@ -3225,6 +3221,108 @@ document.getElementById("removeImage").addEventListener("click", clearSelectedIm
 let mediaRecorder = null;
 let audioChunks = [];
 let isRecording = false;
+let pendingVoiceMessage = null;
+
+let previewAudioObjectUrl = null;
+
+function showAudioPreview(audioBlob, duration) {
+
+    const preview = document.getElementById("audioPreview");
+    const audio = document.getElementById("previewAudio");
+    const playBtn = document.getElementById("previewAudioPlay");
+    const durationText = document.getElementById("previewAudioDuration");
+
+    // Release previous preview URL
+    if (previewAudioObjectUrl) {
+        URL.revokeObjectURL(previewAudioObjectUrl);
+    }
+
+    // Create local blob URL
+    previewAudioObjectUrl = URL.createObjectURL(audioBlob);
+
+    audio.src = previewAudioObjectUrl;
+
+    // Show duration immediately from recording
+    durationText.textContent = formatAudioTime(duration);
+
+    preview.classList.remove("d-none");
+
+    // Reset button
+    playBtn.innerHTML = '<i class="fa-solid fa-play"></i>';
+
+    // Play / pause preview
+    playBtn.onclick = async function () {
+
+        try {
+
+            if (audio.paused) {
+
+                await audio.play();
+                playBtn.innerHTML = '<i class="fa-solid fa-pause"></i>';
+
+            } else {
+
+                audio.pause();
+                playBtn.innerHTML = '<i class="fa-solid fa-play"></i>';
+
+            }
+
+        } catch (error) {
+
+            console.error(
+                "Preview audio failed:",
+                error
+            );
+
+        }
+
+    };
+
+    // When preview finishes
+    audio.onended = function () {
+
+        playBtn.innerHTML =
+            '<i class="fa-solid fa-play"></i>';
+
+        audio.currentTime = 0;
+
+    };
+
+    console.log(
+        "AUDIO PREVIEW SHOWN:",
+        audioBlob.size,
+        audioBlob.type,
+        duration
+    );
+}
+
+function clearAudioPreview() {
+    const preview = document.getElementById("audioPreview");
+    const audio = document.getElementById("previewAudio");
+    const playBtn = document.getElementById("previewAudioPlay");
+
+    if (audio) {
+        audio.pause();
+        audio.currentTime = 0;
+        audio.src = "";
+    }
+
+    if (previewAudioObjectUrl) {
+        URL.revokeObjectURL(previewAudioObjectUrl);
+        previewAudioObjectUrl = null;
+    }
+
+    preview.classList.add("d-none");
+
+    playBtn.innerHTML = '<i class="fa-solid fa-play"></i>';
+
+    pendingVoiceMessage = null;
+}
+document.getElementById("removeAudioPreview")
+    .addEventListener(
+        "click",
+        clearAudioPreview
+    );
 
 // Store when recording started
 let recordingStartTime = 0;
@@ -3458,15 +3556,33 @@ document.getElementById("micBtn").addEventListener("click", async function () {
                     }
 
                     // UPLOAD
-                    await sendVoiceMessage(
+                    /*await sendVoiceMessage(
                         audioBlob,
                         mimeType,
                         recordingDuration
                     );
 
                     audioChunks = [];
+                    mediaRecorder = null;*/
 
+                    // SAVE VOICE MESSAGE FOR SEND BUTTON
+                    pendingVoiceMessage = {
+                        audioBlob: audioBlob,
+                        mimeType: mimeType,
+                        duration: recordingDuration
+                    };
+                    
+                    showAudioPreview(
+                        audioBlob,
+                        recordingDuration
+                    );
+
+                    console.log("VOICE MESSAGE READY TO SEND:", pendingVoiceMessage);
+
+                    audioChunks = [];
                     mediaRecorder = null;
+
+                    resetMicButton();
                 };
 
 
