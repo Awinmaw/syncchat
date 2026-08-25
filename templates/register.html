@@ -24,6 +24,94 @@
       }
 
     }
+
+    .password-wrapper{
+      position:relative;
+    }
+
+    .password-wrapper .form-control{
+      padding-right:2.75rem;
+      background-image:none !important; /* never paint Bootstrap's built-in valid/invalid icons here */
+    }
+
+    .password-wrapper input[type="password"]::-ms-reveal,
+    .password-wrapper input[type="password"]::-ms-clear{
+      display:none; /* remove Edge's native eye button */
+    }
+
+    .toggle-password{
+      position:absolute;
+      top:50%;
+      right:0.75rem;
+      transform:translateY(-50%);
+      display:flex;
+      align-items:center;
+      padding:0.25rem;
+      background:transparent;
+      border:0;
+      color:#6c757d;
+      line-height:0;
+    }
+
+    .toggle-password:hover{
+      color:#212529;
+    }
+
+    .toggle-password:focus{
+      outline:0;
+      box-shadow:none;
+    }
+
+    .toggle-password .icon-hide{
+      display:none;
+    }
+
+    .toggle-password.is-showing .icon-show{
+      display:none;
+    }
+
+    .toggle-password.is-showing .icon-hide{
+      display:block;
+    }
+
+    .mismatch-feedback{
+      display:none;
+      margin-top:0.25rem;
+      font-size:0.875rem;
+      color:var(--bs-danger);
+    }
+
+    .mismatch-feedback.show{
+      display:block;
+    }
+
+    .password-requirements{
+      display:none;
+      margin-top:0.5rem;
+      padding-left:0.25rem;
+      font-size:0.8125rem;
+    }
+
+    .password-requirements.show{
+      display:block;
+    }
+
+    .password-requirements div{
+      color:#6c757d;
+    }
+
+    .password-requirements div::before{
+      content:"\2715";
+      margin-right:0.4rem;
+    }
+
+    .password-requirements div.valid{
+      color:#198754;
+    }
+
+    .password-requirements div.valid::before{
+      content:"\2713";
+    }
   </style>
 
 </head>
@@ -38,7 +126,7 @@
     </h2>
 
 
-    <form action="/register" method="post">
+    <form action="/register" method="post" id="register-form" novalidate>
 
 
       <div class="mb-3">
@@ -54,10 +142,17 @@
           class="form-control"
           placeholder="Enter username"
           autocomplete="username"
+          pattern="\S+"
+          title="3-20 characters, no spaces"
+          minlength="3"
+          maxlength="20"
           required>
 
-      </div>
+        <div class="invalid-feedback">
+          Please enter 3-20 characters without spaces.
+        </div>
 
+      </div>
 
 
       <div class="mb-3">
@@ -66,27 +161,111 @@
           Password
         </label>
 
-        <input 
-          id="password"
-          name="password"
-          type="password"
-          class="form-control"
-          placeholder="Enter password"
-          autocomplete="new-password"
-          required>
+        <div class="password-wrapper">
+
+          <input 
+            id="password"
+            name="password"
+            type="password"
+            class="form-control"
+            placeholder="Enter password"
+            autocomplete="new-password"
+            minlength="5"
+            maxlength="20"
+            required>
+
+          <button 
+            type="button"
+            class="toggle-password"
+            data-target="password"
+            aria-label="Show password">
+
+            <span class="icon-show">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+            </span>
+
+            <span class="icon-hide">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                <line x1="1" y1="1" x2="23" y2="23"/>
+              </svg>
+            </span>
+
+          </button>
+
+        </div>
+
+        <div class="password-requirements" id="password-requirements">
+          <div data-rule="capital">First letter must be a capital letter</div>
+          <div data-rule="numbers">Must contain at least 3 numbers</div>
+          <div data-rule="special">Must contain a special character</div>
+        </div>
+
+        <div class="mismatch-feedback" id="password-feedback">
+          Password does not meet the requirements above.
+        </div>
 
       </div>
 
+
+      <div class="mb-3">
+
+        <label for="confirm_password" class="form-label">
+          Confirm Password
+        </label>
+
+        <div class="password-wrapper">
+
+          <input 
+            id="confirm_password"
+            name="confirm_password"
+            type="password"
+            class="form-control"
+            placeholder="Re-enter password"
+            autocomplete="new-password"
+            minlength="5"
+            maxlength="20"
+            required>
+
+          <button 
+            type="button"
+            class="toggle-password"
+            data-target="confirm_password"
+            aria-label="Show password">
+
+            <span class="icon-show">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+            </span>
+
+            <span class="icon-hide">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                <line x1="1" y1="1" x2="23" y2="23"/>
+              </svg>
+            </span>
+
+          </button>
+
+        </div>
+
+        <div class="mismatch-feedback" id="confirm-feedback">
+          Passwords do not match.
+        </div>
+
+      </div>
 
 
       <button type="submit" class="btn btn-success w-100">
         Register
       </button>
 
-
     </form>
-
-
 
     <p class="text-center mt-3 mb-0">
 
@@ -98,12 +277,109 @@
 
     </p>
 
-
   </div>
 
-
-
   <script src="/static/Bootstrap-5.3.8/js/bootstrap.bundle.min.js"></script>
+
+  <script>
+    document.querySelectorAll(".toggle-password").forEach(function (button) {
+
+      button.addEventListener("click", function () {
+
+        var input = document.getElementById(button.dataset.target);
+        var hidden = input.type === "password";
+
+        input.type = hidden ? "text" : "password";
+        button.classList.toggle("is-showing", hidden);
+        button.setAttribute("aria-label", hidden ? "Hide password" : "Show password");
+
+        input.focus();
+
+      });
+
+    });
+
+
+    var form = document.getElementById("register-form");
+    var username = document.getElementById("username");
+    var password = document.getElementById("password");
+    var confirmPassword = document.getElementById("confirm_password");
+    var passwordRequirements = document.getElementById("password-requirements");
+    var passwordFeedback = document.getElementById("password-feedback");
+    var confirmFeedback = document.getElementById("confirm-feedback");
+
+
+    function checkPasswordRules() {
+
+      var value = password.value;
+
+      return {
+        capital: /^[A-Z]/.test(value),
+        numbers: (value.match(/\d/g) || []).length >= 3,
+        special: /[^A-Za-z0-9]/.test(value)
+      };
+
+    }
+
+
+    function validatePassword() {
+
+      var rules = checkPasswordRules();
+      var allValid = true;
+
+      Object.keys(rules).forEach(function (key) {
+
+        document
+          .querySelector('#password-requirements [data-rule="' + key + '"]')
+          .classList.toggle("valid", rules[key]);
+
+        if (!rules[key]) {
+          allValid = false;
+        }
+
+      });
+
+      var started = password.value !== "";
+
+      passwordRequirements.classList.toggle("show", started);
+      password.classList.toggle("is-invalid", started && !allValid);
+      passwordFeedback.classList.toggle("show", started && !allValid);
+
+      return allValid || !started;
+
+    }
+
+
+    function validateMatch() {
+
+      var mismatch = confirmPassword.value !== "" && confirmPassword.value !== password.value;
+
+      confirmPassword.classList.toggle("is-invalid", mismatch);
+      confirmFeedback.classList.toggle("show", mismatch);
+
+      return !mismatch;
+
+    }
+
+
+    password.addEventListener("input", validatePassword);
+    confirmPassword.addEventListener("input", validateMatch);
+
+
+    form.addEventListener("submit", function (event) {
+
+      var passwordValid = validatePassword();
+      var matchValid = validateMatch();
+
+      if (!form.checkValidity() || !passwordValid || !matchValid) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+
+      form.classList.add("was-validated");
+
+    });
+  </script>
 
 </body>
 </html>
