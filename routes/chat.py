@@ -284,8 +284,16 @@ async def websocket_endpoint(websocket: WebSocket):
 
             if msg.get("type") in ["typing", "stop_typing"]:
 
-                print(username, msg.get("type"))
+                #print(username, msg.get("type"))
+                print(
+                    "TYPING:",
+                    username,
+                    msg.get("type"),
+                    "receiver:",
+                    receiver
+                )
 
+                # FOR PRIVATE CHAT
                 if receiver:
 
                     await notify_typing(
@@ -293,6 +301,32 @@ async def websocket_endpoint(websocket: WebSocket):
                         receiver=receiver,
                         typing=(msg.get("type") == "typing")
                     )
+
+                # FOR PUBLIC CHAT
+                else:
+
+                    typing_data = {
+                        "type": "typing",
+                        "username": username,
+                        "is_typing": msg.get("type") == "typing"
+                    }
+
+                    for connection, info in list(connections.items()):
+
+                        # Send only to users in the same public room
+                        if info["room_id"] == room_id:
+
+                            # Don't send typing event back to the sender
+                            if info["username"] == username:
+                                continue
+                            
+                            try:
+                                await connection.send_text(
+                                    json.dumps(typing_data)
+                                )
+
+                            except Exception:
+                                connections.pop(connection, None)
 
                 continue
 
@@ -325,6 +359,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         message=msg.get("message"),
                         message_type="text",
                         media_url=None,
+                        reply_to_message_id=msg.get("reply_to_id"),
                         sent_at=datetime.utcnow()
                     )
 
@@ -339,6 +374,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         message=msg.get("message") or None,
                         message_type="image",
                         media_url=msg.get("media_url"),
+                        reply_to_message_id=msg.get("reply_to_id"),
                         sent_at=datetime.utcnow()
                     )
 
@@ -372,6 +408,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         message_type="audio",
                         media_url=msg.get("media_url"),
                         duration=audio_duration,
+                        reply_to_message_id=msg.get("reply_to_id"),
                         sent_at=datetime.utcnow()
                     )
 
@@ -395,6 +432,13 @@ async def websocket_endpoint(websocket: WebSocket):
                             new_message.id
                         )
 
+                reply_message = None
+
+                if new_message.reply_to_message_id:
+                    reply_message = db.query(Message).filter(
+                        Message.id == new_message.reply_to_message_id
+                    ).first()
+
                 payload = {
                     "type": "message",
                     "id": new_message.id,
@@ -402,7 +446,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     "sender": username,
                     "receiver": receiver,
 
-                    # Text/Audio/Image URL
+                    # Text / Image / Audio
                     "message": new_message.message,
                     "message_type": new_message.message_type,
                     "media_url": new_message.media_url,
@@ -416,6 +460,21 @@ async def websocket_endpoint(websocket: WebSocket):
 
                     "is_read": new_message.is_read,
                     "public_seen": new_message.public_seen,
+
+                    # Reply information
+                    "reply_to_message_id": new_message.reply_to_message_id,
+
+                    "reply_to": {
+                        "id": reply_message.id,
+                        "sender": (
+                            reply_message.sender.username
+                            if reply_message.sender
+                            else "Deleted User"
+                        ),
+                        "message": reply_message.message,
+                        "message_type": reply_message.message_type,
+                        "media_url": reply_message.media_url,
+                    } if reply_message else None,
                 }
 
                 # Send message to opened chat room only
@@ -783,6 +842,31 @@ def get_messages(room_id: int = Query(None),
                 "message_type": msg.message_type,
                 "media_url": msg.media_url,
                 "duration": msg.duration,
+
+                "reply_to_message_id": msg.reply_to_message_id,
+                "reply_to": {
+                    "id": msg.replied_to.id,
+                    "sender": (
+                        msg.replied_to.sender.username
+                        if msg.replied_to and msg.replied_to.sender
+                        else "Deleted User"
+                    ),
+                    "message": (
+                        msg.replied_to.message
+                        if msg.replied_to
+                        else None
+                    ),
+                    "message_type": (
+                        msg.replied_to.message_type
+                        if msg.replied_to
+                        else None
+                    ),
+                    "media_url": (
+                        msg.replied_to.media_url
+                        if msg.replied_to
+                        else None
+                    )
+                } if msg.replied_to else None,
                 
                 "sent_at": msg.sent_at.isoformat() + "Z" if msg.sent_at else None,
                 "is_read": msg.is_read,

@@ -51,10 +51,15 @@ class Message(Base):
     __tablename__ = "messages"
 
     id = Column(Integer, primary_key=True, index=True)
-
     room_id = Column(Integer, ForeignKey("chat_rooms.id"))
-
     sender_id = Column(Integer, ForeignKey("users.id"))
+
+    # Reply to another message
+    reply_to_message_id = Column(
+        Integer,
+        ForeignKey("messages.id"),
+        nullable=True
+    )
 
     # Text message
     message = Column(String(1000), nullable=True)
@@ -97,8 +102,22 @@ class Message(Base):
     )
 
     sender = relationship("User", back_populates="messages")
-
     room = relationship("ChatRoom", back_populates="messages")
+
+    # Message being replied to
+    replied_to = relationship(
+        "Message",
+        remote_side=[id],
+        foreign_keys=[reply_to_message_id],
+        #uselist=False
+        back_populates="replies"
+    )
+    # Messages replying to this message
+    replies = relationship(
+        "Message",
+        foreign_keys=[reply_to_message_id],
+        back_populates="replied_to"
+    )
 
 
 

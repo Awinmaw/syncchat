@@ -110,9 +110,14 @@
               <!-- Dynamic user info -->
               <div id="chatHeader" class="flex-grow-1"></div>
           </div>
+            
+          
           
           <!-- Messages -->
           <div id="messages" class="flex-grow-1 overflow-auto"></div>
+          
+          <!-- Typing indicator -->
+          <div id="typingIndicator" class="typing-indicator d-none"></div>
 
           <!-- Sounds -->
           <audio id="sendSound" src="/static/discord-notification.mp3" preload="auto"></audio>
@@ -198,8 +203,32 @@
 
                     </div>
 
-                    <div class="chat-input-container">
+                    <!-- Reply Preview -->
+                    <div id="replyPreview" class="reply-preview d-none">
 
+                        <div class="reply-preview-content">
+                            <div class="reply-preview-title">
+                                <i class="fa-solid fa-reply"></i>
+                                Replying to <strong id="replyPreviewSender"></strong>
+                            </div>
+
+                            <div id="replyPreviewMessage" class="reply-preview-message">
+                            </div>
+                        </div>
+
+                        <button
+                            type="button"
+                            id="cancelReplyBtn"
+                            class="reply-preview-close"
+                            title="Cancel reply"
+                        >
+                            <i class="fa-solid fa-xmark"></i>
+                        </button>
+
+                    </div>
+
+                    <!-- Message input -->
+                    <div class="chat-input-container">
                         <div id="recordingText" style="display:none;">
                             Recording...
                         </div>
@@ -248,6 +277,13 @@
   let reconnectTimer = null;
   let manualClose = false;
   let socketId = 0;
+
+  // REPLY MESSAGE
+  let replyingToMessageId = null;
+  let replyingToMessage = null;
+
+  // Typing Indicator
+  const typingUsers = new Set();
 
 
 function scrollMessagesToBottom(behavior = "auto") {
@@ -633,6 +669,119 @@ function createAudioMessage(msg) {
     return audioWrapper;
 }
 
+
+function scrollToRepliedMessage(messageId) {
+    const target = document.querySelector(
+        `.message[data-message-id="${messageId}"]`
+    );
+
+    if (!target) {
+        console.log("Original message not found:", messageId);
+        return;
+    }
+
+    target.scrollIntoView({
+        behavior: "smooth",
+        block: "center"
+    });
+
+    // Highlight it temporarily
+    target.classList.add("reply-highlight");
+
+    setTimeout(() => {
+        target.classList.remove("reply-highlight");
+    }, 1500);
+}
+
+function createReplyPreview(msg) {
+
+    if (!msg.reply_to) {
+        return null;
+    }
+
+    const replyBox = document.createElement("div");
+
+    replyBox.className = "reply-preview";
+
+    // Make it clickable later
+    replyBox.dataset.replyMessageId = msg.reply_to.id;
+
+    const replySender = document.createElement("div");
+
+    replySender.className = "reply-preview-sender";
+
+    replySender.textContent =
+        msg.reply_to.sender || "Deleted User";
+
+
+    const replyContent = document.createElement("div");
+
+    replyContent.className = "reply-preview-content";
+
+
+    // Text reply
+    if (
+        msg.reply_to.message_type === "text" &&
+        msg.reply_to.message
+    ) {
+
+        replyContent.textContent =
+            msg.reply_to.message;
+
+    }
+
+    // Image reply
+    else if (
+        msg.reply_to.message_type === "image"
+    ) {
+
+        replyContent.textContent =
+            "🖼️ Image";
+
+    }
+
+    // Audio reply
+    else if (
+        msg.reply_to.message_type === "audio"
+    ) {
+
+        replyContent.textContent = "🎤 Voice message";
+
+    }
+
+    else {
+
+        replyContent.textContent = "Message";
+
+    }
+
+
+    replyBox.appendChild(replySender);
+    replyBox.appendChild(replyContent);
+
+
+    return replyBox;
+}
+
+
+function createReplyButton(msg) {
+    const replyBtn = document.createElement("button");
+
+    replyBtn.className = "reply-message-btn";
+    replyBtn.dataset.messageId = msg.id;
+    replyBtn.title = "Reply";
+
+    replyBtn.innerHTML = `
+        <i class="fa-solid fa-reply"></i>
+    `;
+
+    replyBtn.addEventListener("click", () => {
+        startReply(msg);
+    });
+
+    return replyBtn;
+}
+
   // render messages array
   function renderMessages(messages) {
   const messagesDiv = document.getElementById("messages");
@@ -669,6 +818,7 @@ function createAudioMessage(msg) {
     // bubble
     const bubble = document.createElement("div");
     bubble.className = msg.sender === username ? "message me" : "message other";
+    bubble.dataset.messageId = msg.id;
 
     // sender
     const sender = document.createElement("strong");
@@ -680,6 +830,20 @@ function createAudioMessage(msg) {
     }
     
     bubble.appendChild(sender);
+
+    // Reply preview
+    const replyPreview = createReplyPreview(msg);
+
+    if (replyPreview) {
+        
+        replyPreview.style.cursor = "pointer";
+
+        replyPreview.addEventListener("click", () => {
+            scrollToRepliedMessage(msg.reply_to.id);
+        });
+
+        bubble.appendChild(replyPreview);
+    }
 
     // Message content
     if (msg.message) {
@@ -735,7 +899,7 @@ function createAudioMessage(msg) {
         bubble.appendChild(audioWrapper);
     }
 
-    
+
     // horizontal line
     const footer = document.createElement("div");
     footer.className = "msg-footer";
@@ -775,7 +939,21 @@ function createAudioMessage(msg) {
     //bubble.appendChild(time);
     footer.appendChild(time);
     bubble.appendChild(footer);
-    row.appendChild(bubble);
+
+    // Message + reply button wrapper
+    const messageWrapper = document.createElement("div");
+
+    messageWrapper.className = "message-content-wrapper";
+
+    messageWrapper.appendChild(bubble);
+
+
+    // Reply button ONLY for other user's messages
+    if (msg.sender !== username) {
+        messageWrapper.appendChild(createReplyButton(msg));
+    }
+
+    row.appendChild(messageWrapper);
     messagesDiv.appendChild(row);
   });
 
@@ -785,6 +963,7 @@ function createAudioMessage(msg) {
       messagesDiv.scrollTop = messagesDiv.scrollHeight;
   }*/
 }
+
 
 // helper to append a single message row (used for incoming WebSocket messages)
 function appendMessageRow(msg) {
@@ -818,6 +997,7 @@ function appendMessageRow(msg) {
 
     const bubble = document.createElement("div");
     bubble.className = msg.sender === username ? "message me" : "message other";
+    bubble.dataset.messageId = msg.id;
 
     // sender
     const sender = document.createElement("strong");
@@ -829,6 +1009,20 @@ function appendMessageRow(msg) {
     }
 
     bubble.appendChild(sender);
+
+    // Reply preview
+    const replyPreview = createReplyPreview(msg);
+
+    if (replyPreview) {
+        
+        replyPreview.style.cursor = "pointer";
+
+        replyPreview.addEventListener("click", () => {
+            scrollToRepliedMessage(msg.reply_to.id);
+        });
+
+        bubble.appendChild(replyPreview);
+    }
 
     // Message content
     if (msg.message) {
@@ -935,8 +1129,29 @@ function appendMessageRow(msg) {
     //bubble.appendChild(time);
     footer.appendChild(time);
     bubble.appendChild(footer);
-    row.appendChild(bubble);
+
+    // Message + reply button wrapper
+    const messageWrapper = document.createElement("div");
+
+    messageWrapper.className = "message-content-wrapper";
+
+    messageWrapper.appendChild(bubble);
+
+
+    // Reply button ONLY for other user's messages
+    if (msg.sender !== username) {
+        messageWrapper.appendChild(createReplyButton(msg));
+    }
+
+    row.appendChild(messageWrapper);
     messagesDiv.appendChild(row);
+
+    // Always keep typing indicator after latest message
+    const typingIndicator = document.getElementById("typingIndicator");
+
+    if (typingIndicator) {
+        messagesDiv.appendChild(typingIndicator);
+    }
 
     //messagesDiv.scrollTop = messagesDiv.scrollHeight;
     
@@ -973,8 +1188,44 @@ async function handleIncomingMessage(event) {
   const data = JSON.parse(event.data);
 
   // typing behavior
-  if(data.type === "typing"){
+if (data.type === "typing") {
 
+    console.log("RECEIVED TYPING:", data);
+
+    // PUBLIC CHAT
+    if (!currentReceiver) {
+
+        // Ignore my own typing event
+        if (data.username === username) {
+            return;
+        }
+
+        console.log(
+            "PUBLIC TYPING RECEIVED:",
+            data
+        );
+
+        if (data.is_typing) {
+
+            typingUsers.add(data.username);
+
+        } else {
+
+            typingUsers.delete(data.username);
+
+        }
+
+        console.log(
+            "CURRENT TYPING USERS:",
+            [...typingUsers]
+        );
+
+        updateTypingIndicator();
+
+        return;
+    }
+
+    // PRIVATE CHAT
     showTypingStatus(
         data.username,
         data.typing
@@ -1224,8 +1475,10 @@ async function handleIncomingMessage(event) {
 
 
 // these four for typing behavior
+
 let isTyping = false;
 let typingTimer = null;
+
 let typingAnimationTimer = null;
 let typingDots = 0;
 
@@ -1670,7 +1923,6 @@ async function sendMessage() {
 
     // WebSocket must be ready
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-
         alert("Connection not ready yet. Please wait a moment.");
         return;
     }
@@ -1682,14 +1934,18 @@ async function sendMessage() {
 
         pendingVoiceMessage = null;
 
-        await sendVoiceMessage(
+        const success = await sendVoiceMessage(
             voice.audioBlob,
             voice.mimeType,
-            voice.duration
+            voice.duration,
+            replyingToMessageId
         );
 
-        // REMOVE AUDIO PREVIEW
-        clearAudioPreview();
+        // Only clear reply if voice was successfully sent
+        if (success) {
+            clearAudioPreview();
+            clearReplyPreview();
+        }
 
         input.value = "";
         input.style.height = "24px";
@@ -1743,19 +1999,22 @@ async function sendMessage() {
                 data.media_url
             );
 
+            // Save reply ID before clearing
+            const replyToId = replyingToMessageId;
+
             // Send image through WebSocket
             ws.send(JSON.stringify({
 
                 type: "image",
                 message_type: "image",
                 media_url: data.media_url,
-                message: text
+                message: text,
+                reply_to_id: replyToId
 
             }));
 
-            // Clear selected image
             clearSelectedImage();
-
+            clearReplyPreview();
 
             /*const preview =
                 document.getElementById("imagePreview");
@@ -1797,16 +2056,24 @@ async function sendMessage() {
 
     } else {
 
-        // SEND TEXT ONLY
-        ws.send(
-            JSON.stringify({
+        // SEND TEXT ONLY        
+        const replyToId = replyingToMessageId; // SAVE reply ID before clearing reply state
 
+        console.log("SENDING MESSAGE:", {
+            message: text,
+            reply_to_id: replyToId
+        });
+
+        ws.send(JSON.stringify(
+            {
                 sender: username,
-
-                message: text
-
+                message: text,
+                reply_to_id: replyToId
             })
         );
+
+        // Clear reply preview immediately after sending
+        clearReplyPreview();
     }
 
     // SEND TEXT
@@ -1822,15 +2089,12 @@ async function sendMessage() {
 
     }*/
 
-
     // Clear textarea
     input.value = "";
-
     input.style.height = "24px";
-
     input.style.overflowY = "hidden";
-
 }
+
 
 function clearSelectedImage() {
 
@@ -1895,7 +2159,7 @@ publicBtn.onclick = async function () {
 
         <div class="left">
         <span class="username" style="display:flex; align-items:center; gap:5px;">
-            <img src="/static/UCSP_logo.png" style="width: 35px; height: 35px;">
+            <img src="/static/UCSP_LOGO.jpg" style="width: 38px; height: 38px;">
             UCSP Group Chat
         </span>
         </div>
@@ -2748,7 +3012,7 @@ window.onload = async function () {
   document.getElementById("chatHeader").innerHTML = `
     <div class="left">
       <span class="username" style="display:flex; align-items:center; gap:5px;">
-        <img src="/static/UCSP_logo.png" style="width: 35px; height: 35px;">
+        <img src="/static/UCSP_LOGO.jpg" style="width: 38px; height: 38px;">
         UCSP Group Chat
       </span>
     </div>
@@ -3087,10 +3351,10 @@ function updateReadStatus(lastReadId){
 // for private chat switching
 function openPrivateChat(user) {
 
-    if (!user || !user.username) {
+    if (!user || !user.username) 
+    {
         return;
     }
-
 
     // Stop typing state
     isTyping = false;
@@ -3099,24 +3363,15 @@ function openPrivateChat(user) {
         typingTimer
     );
 
-
     currentReceiver = user.username;
     lastReadMessageId = 0;
 
     // Clear unread
-    unreadCounts[
-        user.username
-    ] = 0;
+    unreadCounts[user.username] = 0;
 
-    delete newChatUsers[
-        user.username
-    ];
+    delete newChatUsers[user.username];
 
-
-    updateUnreadBadge(
-        user.username
-    );
-
+    updateUnreadBadge(user.username);
 
     // Connect to private WebSocket
     connectWebSocket(
@@ -3132,16 +3387,10 @@ function openPrivateChat(user) {
 
 
     // Load messages
-    loadMessagesForRoom(
-        user.username
-    );
-
+    loadMessagesForRoom(user.username);
 
     // Header
-    showPrivateHeader(
-        user
-    );
-
+    showPrivateHeader(user);
 
     // Hide search
     userSearch.value = "";
@@ -3163,6 +3412,107 @@ function openPrivateChat(user) {
         );
     }
 }
+
+
+// START REPLY
+function startReply(message) {
+
+    if (!message || !message.id) {
+        return;
+    }
+
+    replyingToMessageId = message.id;
+    replyingToMessage = message;
+
+    const preview = document.getElementById("replyPreview");
+    const sender = document.getElementById("replyPreviewSender");
+    const messageText = document.getElementById("replyPreviewMessage");
+
+    if (!preview || !sender || !messageText) {
+        return;
+    }
+
+    // Sender name
+    sender.textContent =
+        message.deleted_user
+        ? "Deleted User"
+        : (message.sender || "Unknown");
+
+    let previewText = "";
+
+    const messageType =
+        message.message_type || message.type;
+
+    // IMAGE
+    if (messageType === "image") {
+
+        previewText = "🖼️ Image";
+
+        if (message.message && message.message.trim()) {
+            previewText += ": " + message.message;
+        }
+
+    }
+
+    // AUDIO
+    else if (messageType === "audio") {
+
+        previewText = "🎤 Voice message";
+
+    }
+
+    // TEXT
+    else {
+
+        previewText = message.message || "";
+
+    }
+
+    messageText.textContent = previewText;
+
+    // Show reply preview
+    preview.classList.remove("d-none");
+
+    // Focus message input
+    const input = document.getElementById("messageText");
+
+    if (input) {
+        input.focus();
+    }
+
+    console.log("REPLYING TO MESSAGE:", message);
+    console.log("REPLY MESSAGE ID:", replyingToMessageId);
+}
+
+function clearReplyPreview() {
+
+    replyingToMessageId = null;
+    replyingToMessage = null;
+
+    const preview = document.getElementById("replyPreview");
+
+    if (preview) {
+        preview.classList.add("d-none");
+    }
+}
+
+function cancelReply() {
+
+    clearReplyPreview();
+
+    const input = document.getElementById("messageText");
+
+    if (input) {
+        input.focus();
+    }
+}
+
+    document.getElementById("cancelReplyBtn")
+        .addEventListener(
+            "click",
+            cancelReply
+        );
+
 
 
 // IMAGE ATTACHMENT
@@ -3651,13 +4001,13 @@ function resetMicButton() {
 }
 
 
-async function sendVoiceMessage(audioBlob, mimeType, recordingDuration) {
+async function sendVoiceMessage(audioBlob, mimeType, recordingDuration, replyToId = null) {
 
     resetMicButton();
 
     if (!ws || ws.readyState !== WebSocket.OPEN) {
         alert("Connection not ready yet. Please wait a moment.");
-        return;
+        return false;
     }
 
     // Determine extension
@@ -3708,11 +4058,10 @@ async function sendVoiceMessage(audioBlob, mimeType, recordingDuration) {
         if (!data.success || !data.media_url) {
 
             alert(
-                data.message ||
-                "Voice message upload failed."
+                data.message || "Voice message upload failed."
             );
 
-            return;
+            return false;
         }
 
         console.log(
@@ -3727,7 +4076,8 @@ async function sendVoiceMessage(audioBlob, mimeType, recordingDuration) {
             message_type: "audio",
             media_url: data.media_url,
             message: "",
-            duration: recordingDuration
+            duration: recordingDuration,
+            reply_to_id: replyToId
         };
 
         console.log(
@@ -3736,6 +4086,7 @@ async function sendVoiceMessage(audioBlob, mimeType, recordingDuration) {
         );
 
         ws.send(JSON.stringify(messageData));
+        return true;
 
     } catch (error) {
 
@@ -3747,6 +4098,8 @@ async function sendVoiceMessage(audioBlob, mimeType, recordingDuration) {
         alert(
             "Failed to upload voice message."
         );
+
+        return false;
     }
 }
 
@@ -3768,6 +4121,143 @@ cancelMicBtn.addEventListener("click", function () {
 
     // Stop recorder
     mediaRecorder.stop();
+});
+
+
+
+// typing indicator
+function updateTypingIndicator() {
+
+    const indicator = document.getElementById("typingIndicator");
+
+    if (!indicator) {
+        console.log("TYPING INDICATOR ELEMENT NOT FOUND");
+        return;
+    }
+
+    // PUBLIC CHAT ONLY
+    if (currentReceiver) {
+        indicator.classList.remove("show");
+        indicator.classList.add("d-none");
+        return;
+    }
+
+    if (typingUsers.size === 0) {
+
+        indicator.textContent = "";
+
+        indicator.classList.remove("show");
+        indicator.classList.add("d-none");
+
+        return;
+    }
+
+    let text;
+
+    if (typingUsers.size === 1) {
+
+        const user = [...typingUsers][0];
+
+        text = `${user} is typing`;
+
+    } else if (typingUsers.size === 2) {
+
+        const users = [...typingUsers];
+
+        text = `${users[0]} and ${users[1]} are typing`;
+
+    } else {
+
+        text = `${typingUsers.size} people are typing`;
+
+    }
+
+    indicator.textContent = text;
+
+    indicator.classList.remove("d-none");
+    indicator.classList.add("show");
+
+    // Move indicator underneath latest message
+    const messagesDiv = document.getElementById("messages");
+
+    //messagesDiv.appendChild(indicator);
+
+    // Optional: keep bottom visible
+    //messagesDiv.scrollTop = messagesDiv.scrollHeight;
+
+    // Keep the indicator visible only if user is already near bottom
+    const wasNearBottom =
+        messagesDiv.scrollHeight -
+        messagesDiv.scrollTop -
+        messagesDiv.clientHeight < 50;
+
+    if (wasNearBottom) {
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+}
+
+function sendTypingStatus(isTyping) {
+
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        return;
+    }
+
+    /*ws.send(JSON.stringify({
+        type: "typing",
+        username: username,
+        is_typing: isTyping
+    }));*/
+    ws.send(JSON.stringify({
+        type: isTyping ? "typing" : "stop_typing"
+    }));
+}
+
+
+let typingTimeout = null;
+let isCurrentlyTyping = false;
+
+const messageInput = document.getElementById("messageText");
+
+messageInput.addEventListener("input", () => {
+
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        return;
+    }
+
+    // Empty message → stop typing
+    if (!messageInput.value.trim()) {
+
+        clearTimeout(typingTimeout);
+
+        if (isCurrentlyTyping) {
+            isCurrentlyTyping = false;
+            sendTypingStatus(false);
+        }
+
+        return;
+    }
+
+    // Only send "typing" ONCE when typing starts
+    if (!isCurrentlyTyping) {
+
+        isCurrentlyTyping = true;
+
+        sendTypingStatus(true);
+    }
+
+    // Reset the stop timer every time user types
+    clearTimeout(typingTimeout);
+
+    typingTimeout = setTimeout(() => {
+
+        if (isCurrentlyTyping) {
+
+            isCurrentlyTyping = false;
+
+            sendTypingStatus(false);
+        }
+
+    }, 1500);
 });
 </script>
 </body>
