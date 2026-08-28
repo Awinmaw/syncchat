@@ -122,6 +122,7 @@
           <!-- Sounds -->
           <audio id="sendSound" src="/static/discord-notification.mp3" preload="auto"></audio>
           <audio id="receiveSound" src="/static/telegram-notification.mp3" preload="auto"></audio>
+          <audio id="micClickSound" src="/static/mic-click.mp3" preload="auto"></audio>
 
           <!-- scrollDown -->
           <button id="scrollBottomBtn">
@@ -2134,6 +2135,9 @@ function clearSelectedImage() {
 const publicBtn = document.getElementById("publicChat");
 publicBtn.className = "btn BtnPS w-100 mb-2";
 publicBtn.onclick = async function () {
+
+    // Clear any typing indicator/state from previous room
+    clearTypingIndicator();
     
     // If leaving a private chat, mark it as read
     if (currentReceiver) {
@@ -2158,14 +2162,15 @@ publicBtn.onclick = async function () {
     document.getElementById("chatHeader").innerHTML = `
 
         <div class="left">
-        <span class="username" style="display:flex; align-items:center; gap:5px;">
-            <img src="/static/UCSP_LOGO.jpg" style="width: 38px; height: 38px;">
-            UCSP Group Chat
-        </span>
+            <span class="username" style="display:flex; align-items:center; gap:5px;">
+                <img src="/static/UCSP_LOGO.jpg" 
+                    style="width: 38px; height: 38px;">
+                UCSP Group Chat
+            </span>
         </div>
 
         <div id="publicStats" class="small">
-        0 users • 0 online
+            0 users • 0 online
         </div>
     `;
 
@@ -2173,7 +2178,7 @@ publicBtn.onclick = async function () {
         sidebar.classList.remove("active");
     }
     updatePublicStats();
-    };
+};
 
 
 
@@ -3356,12 +3361,13 @@ function openPrivateChat(user) {
         return;
     }
 
+    // Immediately clear typing indicator from previous room
+    clearTypingIndicator();
+
     // Stop typing state
     isTyping = false;
 
-    clearTimeout(
-        typingTimer
-    );
+    clearTimeout(typingTimer);
 
     currentReceiver = user.username;
     lastReadMessageId = 0;
@@ -3379,9 +3385,7 @@ function openPrivateChat(user) {
             "/ws?username=" +
             encodeURIComponent(username) +
             "&receiver=" +
-            encodeURIComponent(
-                user.username
-            )
+            encodeURIComponent(user.username)
         )
     );
 
@@ -3403,13 +3407,9 @@ function openPrivateChat(user) {
 
 
     // Mobile
-    if (
-        window.innerWidth < 768
-    ) {
-
-        sidebar.classList.remove(
-            "active"
-        );
+    if (window.innerWidth < 768) 
+    {
+        sidebar.classList.remove("active");
     }
 }
 
@@ -3939,6 +3939,14 @@ document.getElementById("micBtn").addEventListener("click", async function () {
             // START RECORDING
             mediaRecorder.start(100);
 
+            // Play microphone click sound
+            const micClickSound = document.getElementById("micClickSound");
+
+            micClickSound.currentTime = 0;
+            micClickSound.play().catch(error => {
+                console.log("Mic click sound could not play:", error);
+            });
+
             // Save recording start time
             recordingStartTime = Date.now();
 
@@ -4194,6 +4202,26 @@ function updateTypingIndicator() {
     if (wasNearBottom) {
         messagesDiv.scrollTop = messagesDiv.scrollHeight;
     }
+}
+
+function clearTypingIndicator() {
+
+    const indicator = document.getElementById("typingIndicator");
+
+    if (indicator) {
+        indicator.textContent = "";
+        indicator.classList.remove("show");
+        indicator.classList.add("d-none");
+    }
+
+    // Remove all users from the previous public-chat typing state
+    typingUsers.clear();
+
+    // Stop pending typing timeout
+    clearTimeout(typingTimeout);
+    typingTimeout = null;
+
+    isCurrentlyTyping = false;
 }
 
 function sendTypingStatus(isTyping) {
