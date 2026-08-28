@@ -3747,23 +3747,21 @@ document.getElementById("micBtn").addEventListener("click", async function () {
             // Request microphone
             const stream =
                 await navigator.mediaDevices.getUserMedia({
-                    audio: true
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    }
                 });
-
 
             audioChunks = [];
 
-
             // Find supported format
-            const mimeType =
-                getSupportedAudioMimeType();
-
+            const mimeType = getSupportedAudioMimeType();
 
             if (!mimeType) {
 
-                stream
-                    .getTracks()
-                    .forEach(track => track.stop());
+                stream.getTracks().forEach(track => track.stop());
 
                 alert(
                     "Your browser does not support audio recording."
@@ -3773,21 +3771,21 @@ document.getElementById("micBtn").addEventListener("click", async function () {
             }
 
 
-            console.log(
-                "RECORDING MIME TYPE:",
-                mimeType
-            );
-
+            console.log("RECORDING MIME TYPE:", mimeType);
 
             // CREATE RECORDER
-            mediaRecorder =
-                new MediaRecorder(
+            mediaRecorder = new MediaRecorder(
                     stream,
                     {
-                        mimeType: mimeType
+                        mimeType: mimeType,
+                        audioBitsPerSecond: 128000
                     }
                 );
 
+            console.log(
+                "ACTUAL AUDIO BITRATE:",
+                mediaRecorder.audioBitsPerSecond
+            );
 
             // RECEIVE AUDIO DATA
             mediaRecorder.ondataavailable =
